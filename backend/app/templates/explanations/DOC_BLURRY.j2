@@ -1,0 +1,1 @@
+Your {{ details.doc_type|default('document')|replace('_', ' ') }} is blurry (Laplacian variance {{ details.blur_score|default(0)|round(1) }} < {{ details.threshold|default(100) }}).
