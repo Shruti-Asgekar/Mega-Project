@@ -3,10 +3,12 @@ Unit Tests for Module 10 (Tamper-Evident Hash Chain).
 """
 
 import tempfile
-import pytest
 from pathlib import Path
-from backend.app.db.database import SessionLocal
-from backend.app.db import init_db
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from backend.app.db.database import Base
 from backend.app.db.models import Applicant, Case, Document, ChainRecord
 from backend.app.core.contracts import FlagCode, Severity, RoutingDecision
 from backend.app.modules.m10_hashchain import (
@@ -25,18 +27,25 @@ spec.loader.exec_module(tamper_mod)
 tamper_file = tamper_mod.tamper_file
 restore_file = tamper_mod.restore_file
 
-@pytest.fixture(autouse=True)
-def setup_db():
-    init_db()
-
-def test_tamper_demo_and_chain_verification():
-    db = SessionLocal()
+@pytest.fixture
+def test_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
     try:
-        # Create temp file
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(b"%PDF-1.4 sample genuine document content for KYC testing 123456789")
-            tmp_path = tmp.name
+        yield db
+    finally:
+        db.close()
 
+def test_tamper_demo_and_chain_verification(test_db):
+    db = test_db
+    # Create temp file
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(b"%PDF-1.4 sample genuine document content for KYC testing 123456789")
+        tmp_path = tmp.name
+
+    try:
         sha = compute_file_sha256(tmp_path)
 
         # Create applicant, case, doc
@@ -65,13 +74,15 @@ def test_tamper_demo_and_chain_verification():
         # 2. Verify clean state -> GREEN
         res = verify_chain(db)
         assert res["valid"] is True
+        assert res["total_records"] == 1
+        assert res["first_broken_seq"] is None
 
-        flags = verify_case_integrity(db, case.id)
-        assert len(flags) == 1
-        assert flags[0].code == FlagCode.INTEGRITY_VERIFIED
-        assert flags[0].severity == Severity.GREEN
+        # Check case integrity flags
+        initial_flags = verify_case_integrity(db, case.id)
+        assert len(initial_flags) == 1
+        assert initial_flags[0].code == FlagCode.INTEGRITY_VERIFIED
 
-        # 3. Tamper file: flip one byte
+        # 3. Tamper file on disk (flip byte)
         tamper_file(tmp_path)
 
         # 4. Verification must turn RED
@@ -95,8 +106,6 @@ def test_tamper_demo_and_chain_verification():
 
         restored_flags = verify_case_integrity(db, case.id)
         assert restored_flags[0].code == FlagCode.INTEGRITY_VERIFIED
-
-        # Cleanup
-        Path(tmp_path).unlink(missing_ok=True)
     finally:
-        db.close()
+        # Cleanup temp file
+        Path(tmp_path).unlink(missing_ok=True)

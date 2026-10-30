@@ -52,10 +52,10 @@ flowchart TD
 | **M4** | Cross-Document Verification | RapidFuzz token_sort_ratio for names, normalized exact/swapped-day DOB matching, token_set_ratio for addresses | RapidFuzz | `NAME_MISMATCH`, `DOB_MISMATCH`, `ADDRESS_MISMATCH` |
 | **M5** | Income & Bank Statement Analyzer | Monthly credit grouping, salary credits keyword detection, recurring EMI pattern matching (>=2 months), EMI burden ratio, bounced payments | Pandas / Regex | `INCOME_MISMATCH`, `EMI_BURDEN_HIGH`, `BOUNCED_PAYMENTS` |
 | **M6** | Forgery Detection (Lite) | PDF producer metadata inspection (Photoshop, Canva, Sejda, etc.), creation/mod date delta, slip component arithmetic, Error Level Analysis (ELA) | pikepdf / PIL | `META_EDITING_SOFTWARE`, `META_MODIFIED_AFTER_CREATED`, `SLIP_ARITHMETIC_MISMATCH`, `ELA_ANOMALY` |
-| **M7** | Fraud Ring Graph | NetworkX bipartite graph linking applicants to hashed identifiers (phone, account, address clusters via RapidFuzz >=92); offline vis.js HTML | NetworkX / Vis.js | `FRAUD_RING_SUSPECTED`, `SHARED_IDENTIFIER`, `NO_FRAUD_RING` |
+| **M7** | Fraud Ring Graph | NetworkX bipartite graph linking applicants to hashed identifiers (phone, account, address clusters via RapidFuzz >=92); rendered with PyVis (Vis.js under the hood) in standalone offline HTML | NetworkX / PyVis (Vis.js) | `FRAUD_RING_SUSPECTED`, `SHARED_IDENTIFIER`, `NO_FRAUD_RING` |
 | **M8** | Explanation Engine | Plain-English explanations generated from 40 Jinja2 templates for all flag codes with Indian Rupee (₹) digit grouping | Jinja2 | Generated plain-English sentences |
-| **M9** | Trust Score & Smart Routing | Transparent 0-100 trust score with documented deduction matrix; policy routing (`AUTO_CLEAR` >= 80, `OFFICER_REVIEW` 50-79, `ESCALATE` < 50 or red flag) | Python Rule Matrix | `AUTO_CLEAR`, `OFFICER_REVIEW`, `ESCALATE` |
-| **M10**| Cryptographic Hash Chain | SHA-256 sequential block ledger linking each document: `SHA256(prev_hash \|\| file_sha256 \|\| doc_id \|\| doc_type \|\| timestamp)`. Tamper-evident disk re-hashing | Cryptography / SHA-256 | `INTEGRITY_VERIFIED`, `INTEGRITY_BROKEN` |
+| **M9** | Trust Score & Smart Routing | Transparent 0-100 trust score with documented deduction matrix; tiered policy routing: `AUTO_CLEAR` (>=80, no red/amber), `OFFICER_REVIEW` (modules 1-5 red flags or score 50-79), `ESCALATE` (hard fraud flags or score <50) | Python Rule Matrix | `AUTO_CLEAR`, `OFFICER_REVIEW`, `ESCALATE` |
+| **M10** | Cryptographic Hash Chain | SHA-256 sequential block ledger linking each document: SHA-256 of prev_hash + file_sha256 + doc_id + doc_type + timestamp. Tamper-evident disk re-hashing | Cryptography / SHA-256 | `INTEGRITY_VERIFIED`, `INTEGRITY_BROKEN` |
 
 ---
 

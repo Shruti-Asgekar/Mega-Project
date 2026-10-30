@@ -80,3 +80,15 @@ This document tracks all design and implementation decisions made during the aut
 - **Context:** Module 10 specifies a tamper-evident hash chain. Checking only the database blocks allows disk files to be tampered with undetected.
 - **Decision:** Ledger verification executes a two-level walk: (1) block linkage and internal payload hash recomputation, and (2) physical disk file re-hashing against the recorded `file_sha256`.
 - **Consequences:** Any bit flipped on disk or altered in the database triggers an instant broken-chain alert identifying the exact block and file modified.
+
+
+---
+
+## ADR 010: Tiered Routing Policy (Soft Red Flags to Officer Review, Hard Flags to Escalate)
+- **Status:** Accepted
+- **Context:** Identity format errors (e.g. mistyped PAN 4th character `PAN_FORMAT_INVALID`, unreadable document, or minor cross-document discrepancy) represent potential user data entry mistakes rather than active adversarial fraud. Routing all red flags to `ESCALATE` causes operational bottlenecks.
+- **Decision:**
+  - Red flags from Modules 1-5 (e.g. `PAN_FORMAT_INVALID`, `AADHAAR_INVALID_FORMAT`, `IFSC_INVALID`, `NAME_MISMATCH`) route to **`OFFICER_REVIEW`** when overall trust score is $\ge 50$.
+  - ONLY hard malicious fraud flags force immediate **`ESCALATE`**: `META_EDITING_SOFTWARE` (PDF modification tools), `SLIP_ARITHMETIC_MISMATCH` (altered salary figures), `FRAUD_RING_SUSPECTED` ($\ge 3$ linked applications), and `INTEGRITY_BROKEN` (tampered ledger/file on disk), or any case with score $< 50$.
+  - Clean applications with zero red/amber flags and score $\ge 80$ continue to route to **`AUTO_CLEAR`**.
+- **Consequences:** Typo'd PAN applications proceed to loan officer review while forged slips and syndicate fraud rings are automatically escalated to fraud investigation.

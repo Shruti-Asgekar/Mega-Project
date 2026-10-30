@@ -189,14 +189,23 @@ def seed_database(reset: bool = False):
     ])
     print(f"  -> clean_applicant Case ID: {case_clean.id} (Score: {case_clean.trust_score}, Route: {case_clean.route})")
 
-    print("[Generator] Generating Scenario 2: typo_pan -> PAN_FORMAT_INVALID...")
+    print("[Generator] Generating Scenario 2: typo_pan -> PAN_FORMAT_INVALID -> OFFICER_REVIEW...")
     typo_pan_doc = generate_pdf("typo_pan.pdf", "INCOME TAX DEPARTMENT", {
         "Name": "Amit Roy", "DOB": "10/10/1992", "PAN_Number": "ABCDZ1234F" # 'Z' 4th char is invalid
     })
-    case_typo = create_case_in_db(db, "Amit Roy", "9820033445", "Sector 14, Gurgaon", [
-        ("pan", typo_pan_doc)
+    amit_aadhaar = generate_pdf("amit_aadhaar.pdf", "AADHAAR CARD", {
+        "Name": "Amit Roy", "DOB": "10/10/1992", "Aadhaar_Number": generate_valid_aadhaar("78901234567")
+    })
+    amit_slip = generate_pdf("amit_slip.pdf", "SALARY STATEMENT", {
+        "Name": "Amit Roy", "Gross Salary": "60,000", "Total Deductions": "5,000", "Net Salary": "55,000"
+    })
+    amit_bank = generate_bank_csv("amit_bank.csv", [
+        {"date": "05/05/2026", "description": "SALARY CREDIT", "debit": 0, "credit": 55000, "balance": 75000}
     ])
-    print(f"  -> typo_pan Case ID: {case_typo.id} (Route: {case_typo.route})")
+    case_typo = create_case_in_db(db, "Amit Roy", "9820033445", "Sector 14, Gurgaon", [
+        ("aadhaar", amit_aadhaar), ("pan", typo_pan_doc), ("salary_slip", amit_slip), ("bank_statement", amit_bank)
+    ])
+    print(f"  -> typo_pan Case ID: {case_typo.id} (Score: {case_typo.trust_score}, Route: {case_typo.route})")
 
     print("[Generator] Generating Scenario 3: blurry_missing -> Blurry slip + No bank statement...")
     blurry_slip = generate_blurry_image("blurry_slip.jpg", "SALARY STATEMENT", {
