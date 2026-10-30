@@ -5,6 +5,9 @@ Runs on port 8000.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Starlette compatibility
+FastAPI.max_body_size = None
 from backend.app.core.config import BACKEND_PORT
 from backend.app.db import init_db
 from backend.app.api.routes import router as api_router

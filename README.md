@@ -132,7 +132,7 @@ Run the complete test suite across all 10 modules:
 pytest backend/tests/ ml-service/tests/
 ```
 
-Expected output: **56 passed** in < 25s.
+Expected output: **57 passed** in < 15s.
 
 ---
 
@@ -159,3 +159,54 @@ Demonstrate physical file tamper detection using Module 10:
    python data-generator/tamper_demo.py --restore
    ```
    *(Returns `valid: True` across all blocks)*
+
+
+---
+
+## 8. Demo Walkthrough
+
+Below are screenshots captured across the platform verification workflow:
+
+### 1. Verification Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+*Overview of seeded verification cases displaying trust scores, tiered decision badges, and case submission timestamps.*
+
+### 2. Clean Case (AUTO_CLEAR)
+![Auto Clear](docs/screenshots/auto_clear.png)
+*Pristine KYC applicant with Verhoeff-valid Aadhaar, matching PAN, and verified income achieving a high trust score and immediate AUTO_CLEAR approval.*
+
+### 3. Typo PAN Case (OFFICER_REVIEW)
+![Officer Review](docs/screenshots/officer_review.png)
+*Applicant with an invalid PAN format routed to OFFICER_REVIEW with a soft deduction, enabling manual agent review without hard escalation.*
+
+### 4. Quality & Completeness Degraded
+![Degraded Case](docs/screenshots/doc_degraded.png)
+*Case flagged for blurry document quality and missing mandatory bank statement, requesting applicant re-upload.*
+
+### 5. Cross-Document Verification Mismatch
+![Cross Document Mismatch](docs/screenshots/cross_doc.png)
+*Cross-document name mismatch detected between Ramesh Kumar and Rajesh Kumar using RapidFuzz fuzzy token comparison.*
+
+### 6. Income & Bank Statement Analyzer
+![Income Mismatch](docs/screenshots/income_mismatch.png)
+*Salary credit vs. declared net income disparity highlighted alongside recurring EMI burden calculations and bounced payment detection.*
+
+### 7. Forged Document Detection (ESCALATE)
+![Forged Document Escalation](docs/screenshots/escalate.png)
+*Severe red flags triggered by Adobe Photoshop metadata tampering and salary component arithmetic mismatches, resulting in immediate ESCALATE routing.*
+
+### 8. Interactive Fraud Ring Detection Graph
+![Fraud Ring Graph](docs/screenshots/fraud_ring.png)
+*Bipartite NetworkX entity graph rendered via PyVis (Vis.js) isolating the 4-node syndicate sharing phones, bank accounts, and fuzzy address clusters amidst 20 benign applicants.*
+
+### 9. Cryptographic Hash Chain Ledger (Valid State)
+![Integrity Green](docs/screenshots/integrity_green.png)
+*Tamper-evident SHA-256 sequential block chain ledger verifying that all document hashes and previous block hashes are cryptographically intact.*
+
+### 10. Tamper-Evident Ledger Breach Detection
+![Integrity Red](docs/screenshots/integrity_red.png)
+*Real-time tamper detection identifying a physical byte alteration on disk with full sequence break isolation and red flag audit alerting.*
+
+### 11. Cryptographic Hash Chain Ledger Restored
+![Integrity Restored](docs/screenshots/integrity_restored.png)
+*Ledger state successfully returning to verified green status after document byte restoration.*

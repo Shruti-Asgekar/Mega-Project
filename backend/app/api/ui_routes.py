@@ -26,15 +26,17 @@ def index_redirect():
 def ui_dashboard(request: Request, db: Session = Depends(get_db)):
     cases = db.query(Case).order_by(Case.created_at.desc()).all()
     return templates.TemplateResponse(
-        "ui/dashboard.html",
-        {"request": request, "cases": cases, "active_tab": "dashboard"}
+        request=request,
+        name="ui/dashboard.html",
+        context={"cases": cases, "active_tab": "dashboard"}
     )
 
 @ui_router.get("/ui/upload", response_class=HTMLResponse)
 def ui_upload(request: Request):
     return templates.TemplateResponse(
-        "ui/upload.html",
-        {"request": request, "active_tab": "upload"}
+        request=request,
+        name="ui/upload.html",
+        context={"active_tab": "upload"}
     )
 
 @ui_router.get("/ui/cases/{case_id}", response_class=HTMLResponse)
@@ -52,9 +54,9 @@ def ui_case_detail(case_id: str, request: Request, db: Session = Depends(get_db)
             flags_by_sev[f.severity].append(f)
 
     return templates.TemplateResponse(
-        "ui/case_detail.html",
-        {
-            "request": request,
+        request=request,
+        name="ui/case_detail.html",
+        context={
             "case": case,
             "flags_by_sev": flags_by_sev,
             "consent_str": consent_str,
@@ -65,8 +67,9 @@ def ui_case_detail(case_id: str, request: Request, db: Session = Depends(get_db)
 @ui_router.get("/ui/graph", response_class=HTMLResponse)
 def ui_graph(request: Request):
     return templates.TemplateResponse(
-        "ui/graph.html",
-        {"request": request, "active_tab": "graph"}
+        request=request,
+        name="ui/graph.html",
+        context={"active_tab": "graph"}
     )
 
 @ui_router.get("/ui/integrity", response_class=HTMLResponse)
@@ -86,6 +89,7 @@ def ui_integrity(request: Request, db: Session = Depends(get_db)):
         })
 
     return templates.TemplateResponse(
-        "ui/integrity.html",
-        {"request": request, "records": enriched_records, "active_tab": "integrity"}
+        request=request,
+        name="ui/integrity.html",
+        context={"records": enriched_records, "active_tab": "integrity"}
     )
