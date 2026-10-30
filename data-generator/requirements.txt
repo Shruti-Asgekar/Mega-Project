@@ -1,0 +1,4 @@
+Faker==26.0.0
+reportlab==4.2.2
+Pillow==10.4.0
+python-dateutil==2.9.0.post0

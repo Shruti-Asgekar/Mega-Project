@@ -1,0 +1,20 @@
+Flask==3.0.3
+Flask-Cors==4.0.1
+pydantic==2.8.2
+pytesseract==0.3.10
+Pillow==10.4.0
+pypdf==4.3.1
+pdfplumber==0.11.4
+pikepdf==8.15.1
+opencv-python-headless==4.10.0.84
+scikit-learn==1.5.1
+numpy==1.26.4
+sentence-transformers==3.0.1
+torch==2.3.1+cpu; sys_platform == 'linux'
+torch==2.3.1; sys_platform == 'win32'
+--extra-index-url https://download.pytorch.org/whl/cpu
+rapidfuzz==3.9.4
+networkx==3.3
+Jinja2==3.1.4
+pytest==8.3.2
+requests==2.32.3

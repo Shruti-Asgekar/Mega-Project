@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: kyc_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kyc_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kyc_password_placeholder}
+      POSTGRES_DB: ${POSTGRES_DB:-kyc_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kyc_user} -d ${POSTGRES_DB:-kyc_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kyc_backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kyc_user}:${POSTGRES_PASSWORD:-kyc_password_placeholder}@postgres:5432/${POSTGRES_DB:-kyc_db}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-super_secret_jwt_key_min_32_characters_placeholder}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super_secret_refresh_key_min_32_characters_placeholder}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ML_SERVICE_URL: http://ml-service:8000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-shared_internal_secret_key_placeholder}
+      UPLOAD_DIR: /uploads
+    ports:
+      - "5000:5000"
+    volumes:
+      - upload_data:/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: kyc_ml_service
+    restart: always
+    environment:
+      PORT: 8000
+      X_INTERNAL_KEY: ${X_INTERNAL_KEY:-shared_internal_secret_key_placeholder}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kyc_frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:5000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  upload_data:
