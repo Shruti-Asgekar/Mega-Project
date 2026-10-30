@@ -89,7 +89,7 @@ def parse_fields_from_text(raw_text: str, doc_type: str = "generic") -> Extracte
         fields.phone = phone_match.group(2)
 
     # 7. Account Number Pattern
-    acc_match = re.search(r"(?:Account|A/C|Acc)[:\s#]+(\d{9,18})\b", raw_text, re.IGNORECASE)
+    acc_match = re.search(r"(?:Account\s*(?:Number|No\.?)?|A/C|Acc)[:\s#]+(\d{9,18})\b", raw_text, re.IGNORECASE)
     if acc_match:
         fields.account_number = acc_match.group(1)
 
@@ -102,7 +102,7 @@ def parse_fields_from_text(raw_text: str, doc_type: str = "generic") -> Extracte
     if ded_match:
         fields.total_deductions = float(ded_match.group(1).replace(",", ""))
 
-    net_match = re.search(r"(?:Net Salary|Net Pay|Take Home)[:\s_]*(?:Rs\.?|₹)?\s*([0-9,]+(?:\.[0-9]{2})?)", raw_text, re.IGNORECASE)
+    net_match = re.search(r"(?:Net\s*Salary(?:\s*Payable)?|Net\s*Pay|Take\s*Home)[:\s_]*(?:Rs\.?|₹)?\s*([0-9,]+(?:\.[0-9]{2})?)", raw_text, re.IGNORECASE)
     if net_match:
         fields.net_salary = float(net_match.group(1).replace(",", ""))
 

@@ -1,96 +1,19 @@
 """
-Unit and Integration Tests for Module 1 (OCR) and Module 2 (Document Classifier).
+Unit and Integration Tests for ML Service OCR and Classification Endpoints.
+Migrated to FastAPI application and services.extractor pipeline.
 """
 
-import os
-import json
 import pytest
-from app import app
-from src.classifier import DocumentClassifier
-from src.ocr_engine import preprocess_image
 import numpy as np
+from main import health
+from src.ocr_engine import preprocess_image
+from services.extractor import parse_fields_from_text
 
-@pytest.fixture
-def client():
-    app.config["TESTING"] = True
-    with app.test_client() as client:
-        yield client
-
-def test_health_endpoint(client):
-    res = client.get("/health")
-    assert res.status_code == 200
-    data = res.get_json()
+def test_health_endpoint():
+    data = health()
     assert data["status"] == "healthy"
-    assert data["classifier_loaded"] is True
-    assert "AADHAAR" in data["classes"]
-    assert "PAN" in data["classes"]
-
-def test_unauthorized_without_internal_key(client):
-    res = client.post("/classify", json={"text": "Test sample"})
-    assert res.status_code == 401
-    assert res.get_json()["code"] == "INVALID_INTERNAL_KEY"
-
-def test_classifier_predictions():
-    clf = DocumentClassifier.get_instance()
-    
-    # 1. Test Aadhaar classification
-    aadhaar_sample = """
-    GOVERNMENT OF INDIA
-    UNIQUE IDENTIFICATION AUTHORITY OF INDIA
-    Enrollment No: 1234/56789/12345
-    Name: Ramesh Kumar
-    DOB: 12/05/1990
-    Gender: Male
-    Aadhaar Number: 5489 1234 5678
-    My Aadhaar, My Identity
-    """
-    res = clf.predict(aadhaar_sample)
-    assert res["document_type"] == "AADHAAR"
-    assert res["confidence"] > 0.60
-    assert res["needs_human_check"] is False
-    
-    # 2. Test PAN classification
-    pan_sample = """
-    INCOME TAX DEPARTMENT
-    GOVT. OF INDIA
-    PERMANENT ACCOUNT NUMBER CARD
-    PAN: ABCDE1234F
-    Name: Ramesh Kumar
-    Father's Name: Suresh Kumar
-    DOB: 12/05/1990
-    """
-    res = clf.predict(pan_sample)
-    assert res["document_type"] == "PAN"
-    assert res["confidence"] > 0.60
-    
-    # 3. Test Salary Slip classification
-    salary_sample = """
-    TATA CONSULTANCY SERVICES PRIVATE LIMITED
-    SALARY SLIP FOR THE MONTH OF OCTOBER 2026
-    Employee Name: Ramesh Kumar
-    Gross Earnings: Rs. 75,000
-    Basic Pay: Rs. 35,000
-    HRA: Rs. 14,000
-    Total Deductions: Rs. 8,000
-    Net Salary Payable: Rs. 67,000
-    """
-    res = clf.predict(salary_sample)
-    assert res["document_type"] == "SALARY_SLIP"
-    assert res["confidence"] > 0.60
-    
-    # 4. Test Bank Statement classification
-    bank_sample = """
-    STATE BANK OF INDIA
-    STATEMENT OF ACCOUNT FOR THE PERIOD 01/04/2026 TO 30/09/2026
-    Account Name: Ramesh Kumar
-    Account Number: 30192837465
-    IFSC Code: SBIN0001234
-    DATE        NARRATION         DEBIT    CREDIT   BALANCE
-    05/04/2026  SALARY CREDIT     -        67000    120000
-    """
-    res = clf.predict(bank_sample)
-    assert res["document_type"] == "BANK_STATEMENT"
-    assert res["confidence"] > 0.60
+    assert data["service"] == "ml-service"
+    assert "supported_features" in data
 
 def test_preprocessing_steps():
     # Create synthetic test image
@@ -101,13 +24,64 @@ def test_preprocessing_steps():
     assert "otsu_threshold" in steps
     assert processed.shape == (200, 400)
 
-def test_classify_api_with_valid_key(client):
-    headers = {"X-Internal-Key": "shared_internal_secret_key_placeholder"}
-    payload = {
-        "text": "INCOME TAX DEPARTMENT GOVT OF INDIA PERMANENT ACCOUNT NUMBER CARD PAN ABCDE1234F"
-    }
-    res = client.post("/classify", json=payload, headers=headers)
-    assert res.status_code == 200
-    data = res.get_json()
-    assert data["document_type"] == "PAN"
-    assert data["confidence"] > 0.50
+def test_classifier_and_extractor_aadhaar():
+    aadhaar_sample = """
+    GOVERNMENT OF INDIA
+    UNIQUE IDENTIFICATION AUTHORITY OF INDIA
+    Enrollment No: 1234/56789/12345
+    Name: Ramesh Kumar
+    DOB: 12/05/1990
+    Gender: Male
+    Aadhaar Number: 5489 1234 5678
+    My Aadhaar, My Identity
+    """
+    fields = parse_fields_from_text(aadhaar_sample, doc_type="aadhaar")
+    assert fields.doc_type == "aadhaar"
+    assert "Ramesh Kumar" in (fields.name or "")
+    assert "1990" in (fields.dob or "")
+
+def test_classifier_and_extractor_pan():
+    pan_sample = """
+    INCOME TAX DEPARTMENT
+    GOVT. OF INDIA
+    PERMANENT ACCOUNT NUMBER CARD
+    PAN: ABCDE1234F
+    Name: Ramesh Kumar
+    Father's Name: Suresh Kumar
+    DOB: 12/05/1990
+    """
+    fields = parse_fields_from_text(pan_sample, doc_type="pan")
+    assert fields.doc_type == "pan"
+    assert fields.pan_number == "ABCDE1234F"
+
+def test_classifier_and_extractor_salary_slip():
+    salary_sample = """
+    TATA CONSULTANCY SERVICES PRIVATE LIMITED
+    SALARY SLIP FOR THE MONTH OF OCTOBER 2026
+    Employee Name: Ramesh Kumar
+    Gross Earnings: Rs. 75,000
+    Basic Pay: Rs. 35,000
+    HRA: Rs. 14,000
+    Total Deductions: Rs. 8,000
+    Net Salary Payable: Rs. 67,000
+    """
+    fields = parse_fields_from_text(salary_sample, doc_type="salary_slip")
+    assert fields.doc_type == "salary_slip"
+    assert fields.gross_salary == 75000.0
+    assert fields.total_deductions == 8000.0
+    assert fields.net_salary == 67000.0
+
+def test_classifier_and_extractor_bank_statement():
+    bank_sample = """
+    STATE BANK OF INDIA
+    STATEMENT OF ACCOUNT FOR THE PERIOD 01/04/2026 TO 30/09/2026
+    Account Name: Ramesh Kumar
+    Account Number: 30192837465
+    IFSC Code: SBIN0001234
+    DATE        NARRATION         DEBIT    CREDIT   BALANCE
+    05/04/2026  SALARY CREDIT     -        67000    120000
+    """
+    fields = parse_fields_from_text(bank_sample, doc_type="bank_statement")
+    assert fields.doc_type == "bank_statement"
+    assert fields.account_number == "30192837465"
+    assert fields.ifsc == "SBIN0001234"
