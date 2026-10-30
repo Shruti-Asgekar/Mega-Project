@@ -28,7 +28,7 @@ jobs:
 
       - name: Lint Backend with ruff
         run: |
-          ruff check backend --select=E9,F63,F7,F82 --show-source
+          ruff check backend --select=E9,F63,F7,F82
 
       - name: Run Backend Tests
         run: |
@@ -55,7 +55,7 @@ jobs:
 
       - name: Lint ML Service with ruff
         run: |
-          ruff check ml-service --select=E9,F63,F7,F82 --show-source
+          ruff check ml-service --select=E9,F63,F7,F82
 
       - name: Run ML Unit Tests
         run: |
