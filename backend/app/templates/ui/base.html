@@ -22,6 +22,8 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    .demo-banner { background: #fef08a; color: #854d0e; text-align: center; padding: 10px 16px; font-weight: 700; font-size: 0.9rem; border-bottom: 1px solid #fde047; }
+    .wakeup-note { background: #e0f2fe; color: #0369a1; text-align: center; padding: 6px 14px; font-size: 0.85rem; border-bottom: 1px solid #bae6fd; }
     .navbar { background: #1e293b; color: white; display: flex; justify-content: space-between; align-items: center; padding: 14px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .nav-brand { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; text-decoration: none; color: white; }
     .nav-links { display: flex; gap: 20px; list-style: none; }
@@ -38,6 +40,10 @@
     .btn-primary:hover { background: var(--primary-hover); }
     .btn-secondary { background: #e2e8f0; color: #334155; }
     .btn-secondary:hover { background: #cbd5e1; }
+    .btn-danger { background: var(--red); color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-success { background: var(--green); color: white; }
+    .btn-success:hover { background: #15803d; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th { text-align: left; padding: 12px 14px; background: #f1f5f9; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
     td { padding: 14px; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
@@ -53,6 +59,21 @@
   </style>
 </head>
 <body>
+  <div class="demo-banner">⚠️ Demo with synthetic data. Do not upload real documents.</div>
+  <div id="wakeup-note" class="wakeup-note" style="display: none;">
+    ☕ Waking up the demo from Render free-tier sleep... Subsequent actions will respond immediately.
+  </div>
+  <script>
+    if (!sessionStorage.getItem('visited')) {
+      document.getElementById('wakeup-note').style.display = 'block';
+      sessionStorage.setItem('visited', '1');
+      setTimeout(function() {
+        var el = document.getElementById('wakeup-note');
+        if (el) el.style.display = 'none';
+      }, 7000);
+    }
+  </script>
+
   <nav class="navbar">
     <a href="/ui" class="nav-brand">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

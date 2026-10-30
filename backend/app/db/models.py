@@ -1,11 +1,13 @@
 """
-SQLAlchemy Models for Verification Platform.
+Database Models (SQLAlchemy 2).
+Supports PostgreSQL and SQLite. Sensitive full values are Fernet-encrypted.
+Includes document blob storage for ephemeral environments and demo tamper audit log.
 """
 
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, JSON
+    Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, JSON, LargeBinary
 )
 from sqlalchemy.orm import relationship
 from backend.app.db.database import Base
@@ -64,6 +66,19 @@ class Document(Base):
     case = relationship("Case", back_populates="documents")
     flags = relationship("FlagModel", back_populates="document", cascade="all, delete-orphan")
     chain_record = relationship("ChainRecord", back_populates="document", uselist=False, cascade="all, delete-orphan")
+    blob = relationship("DocumentBlob", back_populates="document", uselist=False, cascade="all, delete-orphan")
+
+class DocumentBlob(Base):
+    __tablename__ = "document_blobs"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    filename = Column(String(255), nullable=False)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    document = relationship("Document", back_populates="blob")
 
 class FlagModel(Base):
     __tablename__ = "flags"
@@ -116,3 +131,12 @@ class AuditLog(Base):
     timestamp = Column(DateTime, default=utc_now)
 
     case = relationship("Case", back_populates="audit_logs")
+
+class DemoTamperLog(Base):
+    __tablename__ = "demo_tamper_log"
+
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    byte_offset = Column(Integer, nullable=False)
+    original_byte = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=utc_now)

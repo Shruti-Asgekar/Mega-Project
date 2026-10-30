@@ -1,20 +1,31 @@
 """
 Backend REST API and UI Routes.
+Includes health check, case creation, graph visualization, ledger verification,
+and public demo endpoints (tamper, restore, reseed) when DEMO_MODE=true.
 """
 
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List, Any
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Request, Response
+from collections import defaultdict
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Request, Response, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.app.db.database import get_db
 from backend.app.db.models import Applicant, Case, Document, Consent, FlagModel, ChainRecord
-from backend.app.core.config import UPLOAD_DIR
+from backend.app.core import config
+from backend.app.core.config import (
+    UPLOAD_DIR, DEMO_MODE, DEMO_ADMIN_KEY, MAX_UPLOAD_SIZE_BYTES,
+    STORAGE_BACKEND, ML_MODE
+)
+from backend.app.core.storage import (
+    save_document, get_document_bytes, tamper_document_byte, restore_tampered_documents
+)
 from backend.app.core.security import (
     encrypt_value, decrypt_value, mask_aadhaar, mask_pan, mask_phone, mask_account,
     mask_extracted_fields
@@ -30,35 +41,30 @@ from backend.app.pipeline.orchestrator import run_case_pipeline
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".csv"}
-MAX_FILE_SIZE = 10 * 1024 * 1024 # 10 MB
 
-def save_uploaded_file(upload: UploadFile) -> tuple[str, str]:
-    """Validates and saves uploaded file under UUID filename. Returns (saved_path, sha256)."""
-    ext = os.path.splitext(upload.filename or "")[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Invalid file type {ext}. Allowed: PDF, PNG, JPG, JPEG, CSV")
+# In-memory IP rate limiter: 20 req/minute per IP
+_ip_timestamps = defaultdict(list)
 
-    contents = upload.file.read()
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="File size exceeds maximum limit of 10 MB.")
-
-    file_uuid = str(uuid.uuid4())
-    filename = f"{file_uuid}{ext}"
-    saved_path = str(UPLOAD_DIR / filename)
-
-    with open(saved_path, "wb") as f:
-        f.write(contents)
-
-    sha256 = compute_file_sha256(saved_path)
-    return saved_path, sha256
+def check_ip_rate_limit(request: Request, max_requests: int = 20, window_secs: int = 60):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    now = time.time()
+    recent = [t for t in _ip_timestamps[client_ip] if now - t < window_secs]
+    if len(recent) >= max_requests:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment before trying again.")
+    recent.append(now)
+    _ip_timestamps[client_ip] = recent
 
 @router.get("/health")
 def api_health(db: Session = Depends(get_db)):
+    """Fast, lightweight health check endpoint used by cloud orchestrators / Render."""
     db_type = "postgresql" if (db.bind and "postgres" in db.bind.dialect.name) else "sqlite"
     return {
         "status": "healthy",
         "service": "backend",
         "database": db_type,
+        "storage_mode": STORAGE_BACKEND,
+        "ml_mode": ML_MODE,
+        "demo_mode": DEMO_MODE,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -79,6 +85,8 @@ def create_case(
     """
     Submits a new KYC application case with mandatory consent and uploaded documents.
     """
+    check_ip_rate_limit(request, max_requests=20, window_secs=60)
+
     # Enforce mandatory consent
     if not consent_accepted:
         raise HTTPException(
@@ -99,7 +107,7 @@ def create_case(
     db.commit()
     db.refresh(applicant)
 
-    # 2. Create Case
+    # 2. Create Initial Case
     case = Case(
         applicant_id=applicant.id,
         status="PROCESSING",
@@ -130,14 +138,24 @@ def create_case(
 
     for doc_type, file_obj in doc_inputs:
         if file_obj and file_obj.filename:
-            file_path, sha256 = save_uploaded_file(file_obj)
+            ext = os.path.splitext(file_obj.filename)[1].lower()
+            if ext not in ALLOWED_EXTENSIONS:
+                raise HTTPException(status_code=400, detail=f"Invalid file extension {ext}. Allowed: PDF, PNG, JPG, JPEG, CSV")
+
+            contents = file_obj.file.read()
+            if len(contents) > MAX_UPLOAD_SIZE_BYTES:
+                limit_mb = MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)
+                raise HTTPException(status_code=400, detail=f"File exceeds maximum size limit of {limit_mb} MB.")
+
             doc_rec = Document(
                 case_id=case.id,
-                file_path=file_path,
-                sha256=sha256,
+                file_path="",
+                sha256="",
                 doc_type=doc_type
             )
             db.add(doc_rec)
+            db.flush()
+            save_document(db, doc_rec, contents, file_obj.filename)
 
     db.commit()
 
@@ -148,46 +166,38 @@ def create_case(
 
 @router.get("/cases")
 def list_cases(db: Session = Depends(get_db)):
+    """Lists all cases in descending chronological order."""
     cases = db.query(Case).order_by(Case.created_at.desc()).all()
     out = []
     for c in cases:
         out.append({
             "id": c.id,
-            "applicant_name": c.applicant.name_masked,
+            "applicant_name": c.applicant.name_masked if c.applicant else "Unknown",
             "status": c.status,
             "trust_score": c.trust_score,
             "route": c.route,
-            "created_at": c.created_at.isoformat(),
-            "flags_count": len(c.flags),
-            "documents_count": len(c.documents)
+            "created_at": c.created_at.isoformat()
         })
-    return {"cases": out}
+    return out
 
 @router.get("/cases/{case_id}")
 def get_case(case_id: str, db: Session = Depends(get_db)):
+    """Retrieves single case with masked fields, score breakdown, and flags."""
     case = db.query(Case).filter(Case.id == case_id).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     return serialize_case_response(case, db)
 
-@router.post("/cases/{case_id}/rerun")
-def rerun_case(case_id: str, db: Session = Depends(get_db)):
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    updated = run_case_pipeline(case_id, db)
-    return serialize_case_response(updated, db)
-
-@router.get("/graph", response_class=HTMLResponse)
+@router.get("/graph/html", response_class=HTMLResponse)
 def get_graph_html(db: Session = Depends(get_db)):
-    """Serves standalone interactive graph HTML."""
+    """Returns standalone offline Vis.js HTML document for fraud ring inspection."""
     all_applicants = db.query(Applicant).all()
     apps_data = []
     for appl in all_applicants:
+        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else ""
+        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else ""
         c_inst = appl.cases[0] if appl.cases else None
-        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else (appl.phone_masked or "")
-        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else (appl.address_normalised or "")
-        acc = ""
+        acc = None
         if c_inst:
             for d in c_inst.documents:
                 ex = d.extracted_json or {}
@@ -206,19 +216,20 @@ def get_graph_html(db: Session = Depends(get_db)):
             "account_number": acc
         })
 
-    G, _, _ = build_fraud_graph(apps_data)
-    html_content = generate_offline_graph_html(G)
-    return HTMLResponse(content=html_content)
+    G, flags, cluster_count = build_fraud_graph(apps_data)
+    html_content = generate_offline_graph_html(G, cluster_count)
+    return HTMLResponse(content=html_content, status_code=200)
 
 @router.get("/graph/data")
 def get_graph_data(db: Session = Depends(get_db)):
+    """Returns raw JSON node and edge collections for custom graph renderers."""
     all_applicants = db.query(Applicant).all()
     apps_data = []
     for appl in all_applicants:
+        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else ""
+        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else ""
         c_inst = appl.cases[0] if appl.cases else None
-        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else (appl.phone_masked or "")
-        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else (appl.address_normalised or "")
-        acc = ""
+        acc = None
         if c_inst:
             for d in c_inst.documents:
                 ex = d.extracted_json or {}
@@ -237,14 +248,114 @@ def get_graph_data(db: Session = Depends(get_db)):
             "account_number": acc
         })
 
-    G, flags, summary = build_fraud_graph(apps_data)
-    nodes = [{"id": n, **attrs} for n, attrs in G.nodes(data=True)]
-    edges = [{"from": u, "to": v, **attrs} for u, v, attrs in G.edges(data=True)]
-    return {"nodes": nodes, "edges": edges, "summary": summary}
+    G, flags, cluster_count = build_fraud_graph(apps_data)
+    nodes = []
+    for n, data in G.nodes(data=True):
+        nodes.append({
+            "id": n,
+            "label": data.get("label", n),
+            "group": data.get("group", "entity"),
+            "color": data.get("color", "#999999")
+        })
+    edges = []
+    for u, v, data in G.edges(data=True):
+        edges.append({
+            "from": u,
+            "to": v,
+            "type": data.get("type", "links")
+        })
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "ring_count": cluster_count.get("ring_applicants_count", 0) if isinstance(cluster_count, dict) else cluster_count,
+        "summary": cluster_count,
+        "flags": [f.model_dump() for f in flags]
+    }
 
 @router.get("/integrity/verify")
 def verify_ledger_integrity(db: Session = Depends(get_db)):
-    return verify_chain(db)
+    """Executes full cryptographic walk of hash chain blocks and stored files."""
+    audit_result = verify_chain(db)
+    if not audit_result.get("valid"):
+        return JSONResponse(status_code=409, content=audit_result)
+    return audit_result
+
+# --------------------------------------------------------------------------
+# DEMO MODE ENDPOINTS (Only active when DEMO_MODE=true, returns 404 otherwise)
+# --------------------------------------------------------------------------
+
+@router.post("/demo/tamper/{document_id}")
+@router.post("/demo/tamper")
+def demo_tamper(
+    request: Request,
+    document_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Flips 1 byte of document payload in storage to simulate tamper detection."""
+    if not config.DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo endpoints are disabled in production.")
+
+    check_ip_rate_limit(request, max_requests=20, window_secs=60)
+
+    try:
+        doc_id, offset, orig_byte = tamper_document_byte(db, document_id)
+        return {
+            "status": "tampered",
+            "document_id": doc_id,
+            "byte_offset": offset,
+            "message": f"Successfully flipped 1 byte at offset {offset} in document {doc_id}."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/demo/restore")
+def demo_restore(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Restores all tampered document payloads back to their verified pristine state."""
+    if not config.DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo endpoints are disabled in production.")
+
+    check_ip_rate_limit(request, max_requests=20, window_secs=60)
+
+    try:
+        count = restore_tampered_documents(db)
+        return {
+            "status": "restored",
+            "restored_count": count,
+            "message": f"Successfully restored {count} tampered document(s) to pristine state."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/demo/reseed")
+def demo_reseed(
+    request: Request,
+    x_demo_key: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Reseeds demo data from scratch (protected by X-Demo-Key header)."""
+    if not config.DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Demo endpoints are disabled in production.")
+
+    if not x_demo_key or x_demo_key != config.DEMO_ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid X-Demo-Key.")
+
+    check_ip_rate_limit(request, max_requests=5, window_secs=60)
+
+    import sys
+    data_gen_path = Path(__file__).resolve().parent.parent.parent.parent / "data-generator"
+    if str(data_gen_path) not in sys.path:
+        sys.path.insert(0, str(data_gen_path))
+    from generate import seed_database
+    seed_database(reset=True, benign_count=12)
+
+    return {"status": "reseeded", "message": "Demo database successfully reseeded with synthetic cases."}
+
+# --------------------------------------------------------------------------
+# Serializer Helpers
+# --------------------------------------------------------------------------
 
 def sanitize_details_for_api(details: Any) -> Any:
     """Recursively replaces unmasked 12-digit Aadhaar in dicts/lists for API output."""

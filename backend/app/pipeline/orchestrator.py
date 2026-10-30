@@ -2,8 +2,7 @@
 Verification Pipeline Orchestrator.
 Executes verification sequence:
 Extraction -> M3 -> M1 -> M2 -> M4 -> M5 -> M6 -> M7 -> M10 verify -> M8 -> M9.
-Resilient: ML service HTTP calls with timeout & retry, with in-process fallback and DOC_ANALYSIS_DEGRADED flag.
-Idempotent: Rerun cleans up previous flags and replaces them.
+Supports both in-process analysis (Render/production deploy) and HTTP microservice mode.
 """
 
 import os
@@ -14,12 +13,14 @@ from typing import List, Dict, Any, Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from backend.app.core import config
 from backend.app.core.config import ML_SERVICE_URL, INTERNAL_API_KEY
+from backend.app.core.storage import get_document_bytes
 from backend.app.core.contracts import (
     Flag, FlagCode, Severity, ExtractedFields, Transaction
 )
 from backend.app.core.security import mask_extracted_fields, decrypt_value
-from backend.app.db.models import Case, Document, FlagModel, Applicant, AuditLog
+from backend.app.db.models import Case, Document, FlagModel, Applicant, AuditLog, DocumentBlob
 from backend.app.modules.m1_validators import (
     validate_pan, validate_aadhaar, validate_ifsc, validate_dob
 )
@@ -75,6 +76,11 @@ def check_ml_service_online() -> bool:
 
 def call_ml_service_extract(file_bytes: bytes, filename: str, doc_type: str) -> tuple[ExtractedFields, bool]:
     """Tries HTTP call to ml-service /api/extract with timeout and fallback."""
+    if config.ML_MODE == "inprocess":
+        raw_text = inprocess_extract_text(file_bytes, filename)
+        fields = inprocess_parse_fields(raw_text, doc_type=doc_type)
+        return fields, False
+
     if check_ml_service_online():
         try:
             with httpx.Client(timeout=1.0) as client:
@@ -91,13 +97,17 @@ def call_ml_service_extract(file_bytes: bytes, filename: str, doc_type: str) -> 
         except Exception:
             pass
 
-    # In-process fallback
+    # In-process fallback when HTTP fails
     raw_text = inprocess_extract_text(file_bytes, filename)
     fields = inprocess_parse_fields(raw_text, doc_type=doc_type)
     return fields, True
 
 def call_ml_service_blur(file_bytes: bytes, filename: str) -> tuple[dict, bool]:
     """Tries HTTP call to ml-service /api/quality/blur with fallback."""
+    if config.ML_MODE == "inprocess":
+        res = inprocess_blur(file_bytes, filename=filename, blur_threshold=100.0)
+        return res, False
+
     if check_ml_service_online():
         try:
             with httpx.Client(timeout=1.0) as client:
@@ -117,6 +127,15 @@ def call_ml_service_blur(file_bytes: bytes, filename: str) -> tuple[dict, bool]:
 
 def call_ml_service_forgery(file_bytes: bytes, filename: str) -> tuple[List[Flag], bool]:
     """Tries HTTP call to ml-service /api/forgery/analyze with fallback."""
+    if config.ML_MODE == "inprocess":
+        flags = []
+        if filename.lower().endswith(".pdf") or file_bytes[:4] == b"%PDF":
+            flags.extend(inprocess_pdf_meta(file_bytes))
+        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+            ela_flags, _ = inprocess_ela(file_bytes)
+            flags.extend(ela_flags)
+        return flags, False
+
     if check_ml_service_online():
         try:
             with httpx.Client(timeout=1.0) as client:
@@ -165,25 +184,26 @@ def run_case_pipeline(case_id: str, db: Session) -> Case:
 
     # 1. Document Extraction & Pre-Processing
     for doc in case.documents:
-        if not os.path.exists(doc.file_path):
+        file_bytes = get_document_bytes(db, doc.id)
+        if file_bytes is None:
             all_flags.append(
                 Flag(
                     code=FlagCode.DOC_UNREADABLE,
                     module=2,
                     severity=Severity.RED,
                     score_impact=25,
-                    details={"document_id": doc.id, "error": "File missing on disk."},
+                    details={"document_id": doc.id, "error": "Document data missing from storage."},
                     document_id=doc.id
                 )
             )
             continue
 
+        filename = os.path.basename(doc.file_path) if (doc.file_path and not doc.file_path.startswith("db://")) else f"{doc.id}_{doc.doc_type}"
+        blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == doc.id).first()
+        if blob and blob.filename:
+            filename = blob.filename
+
         try:
-            with open(doc.file_path, "rb") as f:
-                file_bytes = f.read()
-
-            filename = os.path.basename(doc.file_path)
-
             # Ensure document is in hash chain
             append_document_to_chain(db, doc)
 
@@ -225,7 +245,6 @@ def run_case_pipeline(case_id: str, db: Session) -> Case:
                 except Exception:
                     pass
 
-            # Update aggregates
             if doc.doc_type == "salary_slip":
                 if merged_fields.get("net_salary"):
                     slip_net_salary = float(merged_fields["net_salary"])
@@ -265,19 +284,23 @@ def run_case_pipeline(case_id: str, db: Session) -> Case:
                 all_flags.extend(validate_dob(merged_fields["dob"], document_id=doc.id))
 
         except Exception as e:
-            logger.error(f"[Pipeline] Corrupt/unreadable file in doc {doc.id}: {e}")
+            logger.error(f"Error processing doc {doc.id}: {e}")
             all_flags.append(
                 Flag(
                     code=FlagCode.DOC_UNREADABLE,
                     module=2,
                     severity=Severity.RED,
-                    score_impact=25,
+                    score_impact=20,
                     details={"document_id": doc.id, "error": str(e)},
                     document_id=doc.id
                 )
             )
 
-    # If degraded mode was used at any point, record flag
+    # 2. Module 2: Quality & Completeness Evaluation
+    m2_flags = evaluate_quality_and_completeness(case.documents, blur_results_map)
+    all_flags.extend(m2_flags)
+
+    # If degraded mode was used at any point (HTTP mode failure), record flag
     if degraded_mode_used:
         all_flags.append(
             Flag(
@@ -285,36 +308,38 @@ def run_case_pipeline(case_id: str, db: Session) -> Case:
                 module=2,
                 severity=Severity.AMBER,
                 score_impact=5,
-                details={"message": "Document analysis ran via resilient in-process engine."}
+                details={"message": "Heavy ML service unreachable; processed using in-process lightweight fallback."}
             )
         )
 
-    # 2. M2 Quality and Completeness Evaluation
-    q_flags = evaluate_quality_and_completeness(docs_metadata_list, blur_results_map)
-    all_flags.extend(q_flags)
+    # 3. Module 4: Cross-Document Consistency Verification
+    if len(docs_metadata_list) >= 2:
+        m4_flags = verify_cross_documents(docs_metadata_list)
+        all_flags.extend(m4_flags)
 
-    # 3. M4 Cross-Document Verification
-    cross_flags = verify_cross_documents(docs_metadata_list)
-    all_flags.extend(cross_flags)
+    # 4. Module 5: Income & Bank Statement Analyzer
+    # Merge extracted transactions if any
+    for d in docs_metadata_list:
+        ext_txs = d["extracted_fields"].get("transactions", [])
+        for t in ext_txs:
+            bank_transactions.append(Transaction(**t))
 
-    # 4. M5 Income and Bank Statement Analyzer
-    if bank_transactions or slip_net_salary:
-        inc_flags, metrics = analyze_bank_statement_and_income(
-            transactions=bank_transactions,
-            slip_net_salary=slip_net_salary,
-            employer=employer
-        )
-        all_flags.extend(inc_flags)
+    m5_flags, m5_metrics = analyze_bank_statement_and_income(
+        transactions=bank_transactions,
+        slip_net_salary=slip_net_salary,
+        employer=employer
+    )
+    all_flags.extend(m5_flags)
 
-    # 5. M7 Fraud Ring Detection across all system applicants
+    # 5. Module 7: Fraud Ring Graph Analysis
+    # Load all applicants and cases to build the cross-applicant graph
     all_applicants = db.query(Applicant).all()
     apps_data = []
     for appl in all_applicants:
+        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else ""
+        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else ""
         c_inst = appl.cases[0] if appl.cases else None
-        # Extract phone and account if available
-        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else (appl.phone_masked or "")
-        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else (appl.address_normalised or "")
-        acc = ""
+        acc = None
         if c_inst:
             for d in c_inst.documents:
                 ex = d.extracted_json or {}
@@ -379,7 +404,7 @@ def run_case_pipeline(case_id: str, db: Session) -> Case:
         details={
             "score": score,
             "route": route.value,
-            "flags_count": len(all_flags)
+            "flag_count": len(all_flags)
         }
     )
     db.add(audit)

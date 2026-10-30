@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: mega-project-kyc
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.10
+      - key: DEMO_MODE
+        value: "true"
+      - key: SEED_ON_START
+        value: "true"
+      - key: STORAGE_BACKEND
+        value: db
+      - key: ML_MODE
+        value: inprocess
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEMO_ADMIN_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false

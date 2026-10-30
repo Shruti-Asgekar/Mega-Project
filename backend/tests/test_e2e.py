@@ -61,16 +61,18 @@ def test_upload_without_consent_returns_400():
     finally:
         db.close()
 
-def test_upload_with_consent_auto_clear_and_pii_masked():
+def test_upload_with_consent_auto_clear_and_pii_masked(monkeypatch):
     import time
     import random
+    from backend.app.core import config
+    monkeypatch.setattr(config, "ML_MODE", "inprocess")
     db = SessionLocal()
 
     app_uid = f"{random.randint(1000, 9999)}"
     test_applicant_name = f"Suresh Sharma {app_uid}"
     valid_aadhaar = generate_valid_aadhaar(f"5489123{app_uid}")
     unique_phone = f"9820{random.randint(100000, 999999)}"
-    unique_addr = f"Flat {random.randint(100, 999)}, Diamond Tower, Cuffe Parade, Mumbai"
+    unique_addr = f"Flat {random.randint(100, 999)}, Tower {app_uid}, Road {app_uid}, City {app_uid}"
 
     # Synthetic genuine Aadhaar PDF
     from reportlab.lib.pagesizes import letter

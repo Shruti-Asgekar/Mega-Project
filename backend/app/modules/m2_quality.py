@@ -30,8 +30,9 @@ def evaluate_quality_and_completeness(
     present_types = set()
 
     for doc in documents:
-        doc_id = doc.get("id")
-        doc_type = doc.get("doc_type", "").lower()
+        doc_id = getattr(doc, "id", None) or (doc.get("id") if isinstance(doc, dict) else None)
+        raw_type = getattr(doc, "doc_type", None) or (doc.get("doc_type", "") if isinstance(doc, dict) else "")
+        doc_type = str(raw_type or "").lower()
         present_types.add(doc_type)
 
         res = blur_results.get(doc_id, {})

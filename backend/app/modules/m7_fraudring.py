@@ -195,7 +195,7 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
 
     return G, flags, summary
 
-def generate_offline_graph_html(G: nx.Graph) -> str:
+def generate_offline_graph_html(G: nx.Graph, summary: Any = None) -> str:
     """
     Renders standalone self-contained Vis.js network graph HTML that works 100% offline.
     """

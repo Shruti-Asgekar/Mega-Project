@@ -1,7 +1,8 @@
 """
-Database Engine & Session Management with automatic SQLite fallback.
+Database Engine & Session Management with Neon PostgreSQL support and SQLite fallback.
 """
 
+import time
 import logging
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -11,24 +12,27 @@ logger = logging.getLogger("kyc.db")
 
 def get_engine():
     db_url = DATABASE_URL
-    if db_url.startswith("postgresql"):
-        try:
-            test_engine = create_engine(db_url, connect_args={"connect_timeout": 2}, pool_pre_ping=True)
-            with test_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            logger.info(f"[DB] Connected successfully to PostgreSQL at {db_url.split('@')[-1]}")
-            return test_engine
-        except Exception as e:
-            logger.warning(f"[DB] PostgreSQL unreachable ({e}). Falling back to SQLite at ./kyc.db")
-            db_url = "sqlite:///./kyc.db"
+    is_postgres = db_url.startswith("postgresql")
 
-    # SQLite
+    if is_postgres:
+        logger.info(f"[DB] Initializing PostgreSQL engine (pool_size=3, recycle=300)...")
+        engine = create_engine(
+            db_url,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=3,
+            max_overflow=2,
+            connect_args={"connect_timeout": 10}
+        )
+        return engine
+
+    # SQLite for local dev
+    logger.info(f"[DB] Initializing SQLite database at {db_url}")
     engine = create_engine(
         db_url,
         connect_args={"check_same_thread": False} if db_url.startswith("sqlite") else {},
         pool_pre_ping=True
     )
-    logger.info(f"[DB] Active database engine: {db_url}")
     return engine
 
 engine = get_engine()

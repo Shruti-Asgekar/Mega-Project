@@ -141,23 +141,25 @@ def verify_chain(db: Session) -> Dict[str, Any]:
                 "records": record_audits
             }
 
-        # 3. Disk File Re-Hash Check
-        if os.path.exists(file_path):
-            current_disk_hash = compute_file_sha256(file_path)
-            if current_disk_hash != rec.file_sha256:
-                return {
-                    "valid": False,
-                    "first_broken_seq": rec.seq,
-                    "document_id": rec.document_id,
-                    "reason": f"Physical document on disk has been modified or corrupted! Disk SHA-256 differs from ledger.",
-                    "records": record_audits
-                }
-        else:
+        # 3. Document Data Re-Hash Check (DB Blob or Filesystem)
+        from backend.app.core.storage import get_document_bytes
+        doc_bytes = get_document_bytes(db, rec.document_id)
+        if doc_bytes is None:
             return {
                 "valid": False,
                 "first_broken_seq": rec.seq,
                 "document_id": rec.document_id,
-                "reason": f"Physical document file missing on disk at {file_path}.",
+                "reason": f"Physical document file/data missing from storage for seq {rec.seq} ({file_path}).",
+                "records": record_audits
+            }
+
+        current_hash = hashlib.sha256(doc_bytes).hexdigest()
+        if current_hash != rec.file_sha256:
+            return {
+                "valid": False,
+                "first_broken_seq": rec.seq,
+                "document_id": rec.document_id,
+                "reason": f"Physical document data has been modified or corrupted! SHA-256 differs from ledger.",
                 "records": record_audits
             }
 

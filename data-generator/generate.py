@@ -28,6 +28,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.app.core.config import UPLOAD_DIR
+from backend.app.core.storage import save_document
 from backend.app.core.contracts import Transaction
 from backend.app.core.security import encrypt_value, mask_phone
 from backend.app.modules.m10_hashchain import compute_file_sha256
@@ -142,21 +143,23 @@ def create_case_in_db(
 
     # Documents
     for doc_type, path in doc_paths:
-        sha = compute_file_sha256(path)
+        file_bytes = Path(path).read_bytes()
         doc = Document(
             case_id=case.id,
             file_path=path,
-            sha256=sha,
+            sha256="",
             doc_type=doc_type
         )
         db.add(doc)
+        db.flush()
+        save_document(db, doc, file_bytes, Path(path).name)
     db.commit()
 
     # Run pipeline
     run_case_pipeline(case.id, db)
     return case
 
-def seed_database(reset: bool = False):
+def seed_database(reset: bool = False, benign_count: int = 12):
     """Generates all 7 demo scenarios and seeds DB."""
     if reset:
         print("[Generator] Resetting database tables...")
@@ -299,7 +302,7 @@ def seed_database(reset: bool = False):
         "95 Saheed Nagar, Bhubaneswar 751007",
         "16 MI Road, Jaipur 302001"
     ]
-    for i, (bname, b_addr) in enumerate(zip(benign_first_names, cities_and_streets), start=1):
+    for i, (bname, b_addr) in enumerate(zip(benign_first_names[:benign_count], cities_and_streets[:benign_count]), start=1):
         full_name = f"{bname} Deshmukh"
         b_ph = f"9988{i:06d}"
         b_acc = f"50100{i:06d}"
@@ -314,8 +317,9 @@ def seed_database(reset: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="Synthetic KYC Document and Scenario Generator")
     parser.add_argument("--reset", action="store_true", help="Reset database tables before seeding")
+    parser.add_argument("--benign-count", type=int, default=12, help="Number of benign applicants to seed (default 12)")
     args = parser.parse_args()
-    seed_database(reset=args.reset)
+    seed_database(reset=args.reset, benign_count=args.benign_count)
 
 if __name__ == "__main__":
     main()

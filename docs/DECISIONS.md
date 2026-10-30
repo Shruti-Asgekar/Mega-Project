@@ -92,3 +92,35 @@ This document tracks all design and implementation decisions made during the aut
   - ONLY hard malicious fraud flags force immediate **`ESCALATE`**: `META_EDITING_SOFTWARE` (PDF modification tools), `SLIP_ARITHMETIC_MISMATCH` (altered salary figures), `FRAUD_RING_SUSPECTED` ($\ge 3$ linked applications), and `INTEGRITY_BROKEN` (tampered ledger/file on disk), or any case with score $< 50$.
   - Clean applications with zero red/amber flags and score $\ge 80$ continue to route to **`AUTO_CLEAR`**.
 - **Consequences:** Typo'd PAN applications proceed to loan officer review while forged slips and syndicate fraud rings are automatically escalated to fraud investigation.
+
+
+---
+
+## ADR 011: Single-Service Production Deployment with In-Process ML Mode and Ephemeral-Disk DB Blob Storage
+- **Status:** Accepted
+- **Context:** Render's free tier provides 512 MB of RAM and an ephemeral filesystem per service instance. Running separate backend and ml-service containers would exceed memory limits and double cold-start latencies. Additionally, ephemeral filesystems wipe local storage on container restarts, which would break Module 10 SHA-256 ledger verification if files resided solely on disk.
+- **Decision:**
+  - Consolidate production deployment into a single web service via `ML_MODE=inprocess`. In this mode, heavy CV and PDF parsing run in-process without network latency, and the `DOC_ANALYSIS_DEGRADED` flag is explicitly suppressed by design (it only triggers when HTTP microservice calls fail).
+  - Introduce `STORAGE_BACKEND=db`, persisting document payloads in PostgreSQL (`document_blobs` BYTEA table) while maintaining compatibility with local filesystem storage (`STORAGE_BACKEND=disk`).
+  - Restrict Uvicorn workers to `--workers 1` and limit benign seeding candidates to 12 on cold boot to ensure memory consumption remains safely under 400 MB.
+- **Consequences:** The entire 10-module platform deploys as a single Render service with persistent cryptographic ledger integrity, fast cold starts, and zero hosting costs.
+
+---
+
+## ADR 012: In-Memory / DB-Backed Tamper-Evident Simulation for Public Web Demo
+- **Status:** Accepted
+- **Context:** Visitors to the public Render deployment cannot execute command-line scripts like `tamper_demo.py` to test Module 10 cryptographic breach detection.
+- **Decision:**
+  - Expose `POST /api/demo/tamper` and `POST /api/demo/restore` protected by the `DEMO_MODE=true` environment flag (returning HTTP 404 when disabled).
+  - Tampering in `db` storage mode flips a single byte at the payload's midpoint in the `document_blobs` table and records the original byte in `demo_tamper_log`.
+  - Provide interactive UI buttons on `/ui/integrity` with client-side DOM badge updates showing immediate red breach detection on tampering and green restoration on restore.
+- **Consequences:** Public visitors can interactively observe and verify cryptographic ledger tamper-evidence in real time from their web browser.
+
+
+---
+
+## ADR 013: Memory Footprint Verification on Render Free Tier
+- **Status:** Accepted
+- **Context:** Render's free tier imposes a strict 512 MB memory limit. We required empirical verification that running the backend with in-process ML analysis, synthetic data generation, graph clustering, and cryptographic hash chain verification stays safely under 400 MB.
+- **Decision:** Ran automated memory benchmark booting backend, generating and storing 12 synthetic cases with documents in BYTEA storage, executing all 10 modules end-to-end, and querying both the bipartite graph and cryptographic integrity endpoints.
+- **Outcome:** Initial RSS measured at 18.05 MB; Peak RSS measured at 170.88 MB. This is well below the 400 MB target threshold, providing a comfortable ~340 MB safety buffer for concurrent requests on Render free tier.

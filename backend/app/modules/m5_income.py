@@ -54,8 +54,11 @@ def extract_month_key(date_str: str) -> str:
 def analyze_bank_statement_and_income(
     transactions: List[Transaction],
     slip_net_salary: Optional[float] = None,
-    employer: Optional[str] = None
+    employer: Optional[str] = None,
+    employer_name: Optional[str] = None
 ) -> tuple[List[Flag], Dict[str, Any]]:
+    if employer is None and employer_name is not None:
+        employer = employer_name
     """
     Analyzes transactions and compares with declared slip net income.
     Returns:
