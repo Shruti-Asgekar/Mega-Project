@@ -10,6 +10,7 @@ import re
 from datetime import datetime, date
 from typing import Optional, List, Tuple
 from backend.app.core.contracts import Flag, FlagCode, Severity
+from backend.app.core.security import mask_aadhaar
 
 # Verhoeff tables
 VERHOEFF_D = (
@@ -111,7 +112,7 @@ def validate_aadhaar(aadhaar: Optional[str], document_id: Optional[str] = None) 
                 module=1,
                 severity=Severity.RED,
                 score_impact=25,
-                details={"aadhaar": cleaned, "reason": "Must be 12 digits and cannot start with 0 or 1"},
+                details={"aadhaar": mask_aadhaar(cleaned), "reason": "Must be 12 digits and cannot start with 0 or 1"},
                 document_id=document_id
             )
         ]
@@ -122,7 +123,7 @@ def validate_aadhaar(aadhaar: Optional[str], document_id: Optional[str] = None) 
                 module=1,
                 severity=Severity.RED,
                 score_impact=25,
-                details={"aadhaar": cleaned, "reason": "Verhoeff checksum verification failed"},
+                details={"aadhaar": mask_aadhaar(cleaned), "reason": "Verhoeff checksum verification failed"},
                 document_id=document_id
             )
         ]
@@ -132,7 +133,7 @@ def validate_aadhaar(aadhaar: Optional[str], document_id: Optional[str] = None) 
             module=1,
             severity=Severity.GREEN,
             score_impact=0,
-            details={"aadhaar": cleaned},
+            details={"aadhaar": mask_aadhaar(cleaned)},
             document_id=document_id
         )
     ]

@@ -26,6 +26,16 @@ def calculate_blur_score(
     """
     ext = os.path.splitext(filename)[1].lower() if filename else ""
 
+    # 0. Handle CSV / Text tables
+    if ext in (".csv", ".txt", ".tsv"):
+        return {
+            "blur_score": 999.0,
+            "is_blurry": False,
+            "text_layer": True,
+            "threshold": blur_threshold,
+            "details": "Digital structured text/CSV"
+        }
+
     # 1. Handle PDF
     if ext == ".pdf" or file_bytes[:4] == b"%PDF":
         try:

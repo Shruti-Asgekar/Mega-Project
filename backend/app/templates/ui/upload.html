@@ -1,0 +1,116 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Submit New KYC Application — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+  <div style="margin-bottom: 24px;">
+    <h1 style="font-size: 1.75rem; font-weight: 700;">Submit KYC & Loan Application</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Upload applicant documents for automated OCR extraction, multi-layered fraud validation, and tamper-evident ledger registration.</p>
+  </div>
+
+  <div id="error-alert" class="alert alert-red" style="display: none;"></div>
+
+  <form id="upload-form" action="/api/cases" method="POST" enctype="multipart/form-data" class="card">
+    <div style="margin-bottom: 20px;">
+      <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">1. Applicant Information</h2>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Full Name *</label>
+          <input type="text" name="applicant_name" required style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border);" placeholder="e.g. Ramesh Kumar">
+        </div>
+        <div>
+          <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Mobile Phone Number</label>
+          <input type="text" name="phone" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border);" placeholder="e.g. 9876543210">
+        </div>
+      </div>
+      <div style="margin-top: 14px;">
+        <label style="display:block; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Residential Address</label>
+        <input type="text" name="address" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border);" placeholder="e.g. Flat 402, Sunshine Heights, MG Road, Pune 411001">
+      </div>
+    </div>
+
+    <div style="margin-bottom: 20px;">
+      <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">2. Upload Required Documents (PDF / Images / CSV)</h2>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div style="background:#f8fafc; padding:14px; border-radius:8px; border:1px solid var(--border);">
+          <label style="display:block; font-weight:600; font-size:0.9rem; margin-bottom:4px;">Aadhaar Card</label>
+          <input type="file" name="aadhaar_file" accept=".pdf,.png,.jpg,.jpeg" style="font-size:0.85rem;">
+        </div>
+        <div style="background:#f8fafc; padding:14px; border-radius:8px; border:1px solid var(--border);">
+          <label style="display:block; font-weight:600; font-size:0.9rem; margin-bottom:4px;">PAN Card</label>
+          <input type="file" name="pan_file" accept=".pdf,.png,.jpg,.jpeg" style="font-size:0.85rem;">
+        </div>
+        <div style="background:#f8fafc; padding:14px; border-radius:8px; border:1px solid var(--border);">
+          <label style="display:block; font-weight:600; font-size:0.9rem; margin-bottom:4px;">Salary Slip</label>
+          <input type="file" name="salary_slip_file" accept=".pdf,.png,.jpg,.jpeg" style="font-size:0.85rem;">
+        </div>
+        <div style="background:#f8fafc; padding:14px; border-radius:8px; border:1px solid var(--border);">
+          <label style="display:block; font-weight:600; font-size:0.9rem; margin-bottom:4px;">Bank Statement</label>
+          <input type="file" name="bank_statement_file" accept=".pdf,.png,.jpg,.jpeg,.csv" style="font-size:0.85rem;">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 24px; background:#eff6ff; padding:16px; border-radius:8px; border:1px solid #bfdbfe;">
+      <h2 style="font-size: 1.05rem; font-weight: 600; color:#1e40af; margin-bottom: 8px;">3. Privacy Declaration & Applicant Consent (Mandatory)</h2>
+      <p style="font-size:0.85rem; color:#1e3a8a; margin-bottom: 12px; line-height:1.4;">
+        "I hereby declare that the documents and information provided are genuine. I authorize the verification system to parse, validate, and perform anti-fraud checks on my submitted KYC documents and bank statements."
+      </p>
+      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; font-size:0.95rem;">
+        <input type="checkbox" id="consent_checkbox" name="consent_accepted" value="true" style="width:18px; height:18px;">
+        I grant explicit consent for automated verification and cryptographic ledger anchoring (v1.0)
+      </label>
+      <input type="hidden" name="consent_version" value="v1.0">
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <a href="/ui" class="btn btn-secondary">&larr; Cancel</a>
+      <button type="submit" class="btn btn-primary" id="submit-btn" style="padding: 12px 28px;">Run Complete Verification Pipeline &rarr;</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const form = document.getElementById('upload-form');
+const consentBox = document.getElementById('consent_checkbox');
+const errorAlert = document.getElementById('error-alert');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorAlert.style.display = 'none';
+
+  if (!consentBox.checked) {
+    errorAlert.textContent = 'Submission blocked: Explicit applicant consent is mandatory before processing.';
+    errorAlert.style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
+  const submitBtn = document.getElementById('submit-btn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Processing Pipeline...';
+
+  const formData = new FormData(form);
+
+  try {
+    const res = await fetch('/api/cases', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail?.error || data.detail || 'Application submission failed');
+    }
+    // Redirect to case details
+    window.location.href = `/ui/cases/${data.id}`;
+  } catch (err) {
+    errorAlert.textContent = err.message;
+    errorAlert.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Run Complete Verification Pipeline →';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+});
+</script>
+{% endblock %}

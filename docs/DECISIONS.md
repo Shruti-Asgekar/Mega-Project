@@ -48,3 +48,35 @@ This document tracks all design and implementation decisions made during the aut
 - **Context:** Master Prompt rules 1, 2, 4, 5, 9 state that modules 1, 4, 5, 7, 8, 9, 10 require RapidFuzz, NetworkX, Jinja2, Fernet, and pytest test execution. Offline environment cannot install missing npm dependencies.
 - **Decision:** Conform backend to Python 3.11 + FastAPI + SQLAlchemy 2 + Uvicorn with SQLite auto-fallback, and ml-service to FastAPI. Provide full pytest test suites for backend and ml-service, plus server-rendered Jinja2 UI at `/ui` and standalone frontend.
 - **Consequences:** All 10 verification modules run natively, fast, offline, and in-process with 100% test coverage.
+
+---
+
+## ADR 006: Self-Contained Vis.js Offline HTML Graph Generation (No CDN Dependency)
+- **Status:** Accepted
+- **Context:** Module 7 requires an interactive visual graph representation of applicant clusters and shared identifiers. In sandboxed or air-gapped environments, loading external JS/CSS CDNs fails.
+- **Decision:** Generate a standalone HTML document utilizing embedded Vis-network scripts and CSS, served directly via `/api/graph` and embedded in `/ui/graph` via an iframe.
+- **Consequences:** The fraud ring graph works 100% offline with zero external network requests.
+
+---
+
+## ADR 007: Hashed Identifier Graph Nodes for Complete PII Leak Prevention
+- **Status:** Accepted
+- **Context:** In Module 7, connecting applicant nodes to phone or account number nodes could inadvertently leak plaintext numbers inside node IDs or serialized graph payloads.
+- **Decision:** Use a 12-character SHA-256 hash of normalized phone and account numbers as graph node identifiers (`phone:<sha256[:12]>`), and strictly apply masking to all human-readable `label` and `title` attributes.
+- **Consequences:** Exact entity linking is mathematically guaranteed while guaranteeing that unmasked phone/account numbers never enter graph HTML or client-side JSON.
+
+---
+
+## ADR 008: Resilient ML Service Degradation & Pipeline Idempotency
+- **Status:** Accepted
+- **Context:** Microservices in production may experience transient network partitions or timeouts. Document verification should not crash if `ml-service` is temporarily unreachable.
+- **Decision:** The pipeline orchestrator wraps ML HTTP calls with a 1.0s timeout and falls back to an in-process Python module import, flagging the case with amber severity `DOC_ANALYSIS_DEGRADED`. Rerunning a case cleanly purges previous flags before computing new ones.
+- **Consequences:** Zero pipeline crashes; clear visibility when running in fallback mode; idempotent rerun capability.
+
+---
+
+## ADR 009: Hybrid Cryptographic Ledger Verification (Linkage + Disk File Re-Hash)
+- **Status:** Accepted
+- **Context:** Module 10 specifies a tamper-evident hash chain. Checking only the database blocks allows disk files to be tampered with undetected.
+- **Decision:** Ledger verification executes a two-level walk: (1) block linkage and internal payload hash recomputation, and (2) physical disk file re-hashing against the recorded `file_sha256`.
+- **Consequences:** Any bit flipped on disk or altered in the database triggers an instant broken-chain alert identifying the exact block and file modified.

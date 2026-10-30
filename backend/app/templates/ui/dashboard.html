@@ -1,0 +1,91 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Dashboard — KYC Verification Platform{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+  <div>
+    <h1 style="font-size: 1.75rem; font-weight: 700;">Application Verification Dashboard</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Review synthetic loan KYC cases, algorithmic trust scores, and automated fraud routing decisions.</p>
+  </div>
+  <a href="/ui/upload" class="btn btn-primary">+ New Application</a>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+    <h2 style="font-size: 1.2rem; font-weight: 600;">Active Cases ({{ cases|length }})</h2>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-secondary" onclick="filterTable('ALL')">All</button>
+      <button class="btn btn-secondary" onclick="filterTable('AUTO_CLEAR')">Auto Clear</button>
+      <button class="btn btn-secondary" onclick="filterTable('OFFICER_REVIEW')">Review</button>
+      <button class="btn btn-secondary" onclick="filterTable('ESCALATE')">Escalate</button>
+    </div>
+  </div>
+
+  <table id="cases-table">
+    <thead>
+      <tr>
+        <th>Applicant (Masked)</th>
+        <th>Trust Score</th>
+        <th>Routing Verdict</th>
+        <th>Flags Detected</th>
+        <th>Documents</th>
+        <th>Submitted At</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for case in cases %}
+      <tr data-route="{{ case.route }}">
+        <td style="font-weight: 600;">{{ case.applicant.name_masked }}</td>
+        <td>
+          {% if case.trust_score >= 80 %}
+            <span class="gauge gauge-green" style="width:40px;height:40px;font-size:0.95rem;border-width:4px;">{{ case.trust_score }}</span>
+          {% elif case.trust_score >= 50 %}
+            <span class="gauge gauge-amber" style="width:40px;height:40px;font-size:0.95rem;border-width:4px;">{{ case.trust_score }}</span>
+          {% else %}
+            <span class="gauge gauge-red" style="width:40px;height:40px;font-size:0.95rem;border-width:4px;">{{ case.trust_score }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if case.route == 'AUTO_CLEAR' %}
+            <span class="badge badge-green">Auto Clear</span>
+          {% elif case.route == 'OFFICER_REVIEW' %}
+            <span class="badge badge-amber">Officer Review</span>
+          {% else %}
+            <span class="badge badge-red">Escalate</span>
+          {% endif %}
+        </td>
+        <td>
+          <span style="font-weight:600;">{{ case.flags|length }} flag(s)</span>
+        </td>
+        <td>{{ case.documents|length }} files</td>
+        <td style="color:var(--text-muted); font-size:0.85rem;">{{ case.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>
+          <a href="/ui/cases/{{ case.id }}" class="btn btn-secondary" style="padding:6px 12px;font-size:0.85rem;">View Analysis &rarr;</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="7" style="text-align:center; padding: 32px; color: var(--text-muted);">
+          No applications found. Click <strong>+ New Application</strong> or run seed generator to populate demo cases.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function filterTable(route) {
+  const rows = document.querySelectorAll('#cases-table tbody tr');
+  rows.forEach(r => {
+    if (route === 'ALL' || r.getAttribute('data-route') === route) {
+      r.style.display = '';
+    } else {
+      r.style.display = 'none';
+    }
+  });
+}
+</script>
+{% endblock %}

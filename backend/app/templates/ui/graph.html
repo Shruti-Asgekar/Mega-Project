@@ -1,0 +1,27 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Fraud Ring Syndicate Detection Graph — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+  <div>
+    <h1 style="font-size: 1.75rem; font-weight: 700;">Fraud Ring Syndicate Detection Graph</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Bipartite NetworkX analysis clustering applicants through shared phone numbers, bank accounts, and addresses (RapidFuzz &ge; 92% match).</p>
+  </div>
+  <a href="/api/graph" target="_blank" class="btn btn-secondary">Open Standalone Graph &nearr;</a>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden; height: 650px; position:relative;">
+  <iframe src="/api/graph" style="width: 100%; height: 100%; border: none;"></iframe>
+</div>
+
+<div class="card">
+  <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 8px;">Automated Syndicate Cluster Rules</h2>
+  <ul style="margin-left: 20px; font-size: 0.9rem; color: var(--text-muted); line-height: 1.6;">
+    <li><strong style="color:var(--red);">Red Node (Fraud Ring Suspected):</strong> Connected component contains &ge; 3 distinct applicants sharing credentials. Triggers automatic case escalation (-35 trust score deduction).</li>
+    <li><strong style="color:var(--amber);">Orange Node (Shared Identifier):</strong> Exactly 2 applicants share an identifier. Triggers amber review alert (-8 trust score deduction).</li>
+    <li><strong style="color:var(--text-muted);">Grey Node:</strong> Standalone benign applicant with no shared credentials.</li>
+    <li>All sensitive identifiers displayed in node tooltips are strictly masked (no plaintext Aadhaar/PAN/Account numbers).</li>
+  </ul>
+</div>
+{% endblock %}

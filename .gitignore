@@ -72,6 +72,8 @@ huggingface/
 # Generated synthetic PDFs and images
 data-generator/output/
 */data-generator/output/
+data-generator/samples/
+*.bak
 *.pdf
 !data-generator/sample_templates/*.pdf
 

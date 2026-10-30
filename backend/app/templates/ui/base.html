@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Intelligent KYC & Loan Verification Platform{% endblock %}</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --green: #16a34a;
+      --green-bg: #dcfce7;
+      --amber: #d97706;
+      --amber-bg: #fef3c7;
+      --red: #dc2626;
+      --red-bg: #fee2e2;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    .navbar { background: #1e293b; color: white; display: flex; justify-content: space-between; align-items: center; padding: 14px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .nav-brand { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; text-decoration: none; color: white; }
+    .nav-links { display: flex; gap: 20px; list-style: none; }
+    .nav-links a { color: #cbd5e1; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.15s; }
+    .nav-links a:hover, .nav-links a.active { color: white; }
+    .container { max-width: 1200px; margin: 32px auto; padding: 0 20px; }
+    .card { background: var(--card-bg); border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 24px; margin-bottom: 24px; }
+    .badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; }
+    .badge-green { background: var(--green-bg); color: var(--green); }
+    .badge-amber { background: var(--amber-bg); color: var(--amber); }
+    .badge-red { background: var(--red-bg); color: var(--red); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 18px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-decoration: none; border: none; transition: background 0.15s; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background: #cbd5e1; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { text-align: left; padding: 12px 14px; background: #f1f5f9; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+    td { padding: 14px; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+    tr:hover { background: #f8fafc; }
+    .alert { padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; font-size: 0.95rem; }
+    .alert-green { background: var(--green-bg); color: #14532d; border: 1px solid #86efac; }
+    .alert-amber { background: var(--amber-bg); color: #78350f; border: 1px solid #fde68a; }
+    .alert-red { background: var(--red-bg); color: #7f1d1d; border: 1px solid #fca5a5; }
+    .gauge { display: inline-flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 50%; border: 6px solid #e2e8f0; font-size: 1.3rem; font-weight: 700; }
+    .gauge-green { border-color: var(--green); color: var(--green); }
+    .gauge-amber { border-color: var(--amber); color: var(--amber); }
+    .gauge-red { border-color: var(--red); color: var(--red); }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/ui" class="nav-brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      KYC Verification Engine
+    </a>
+    <ul class="nav-links">
+      <li><a href="/ui" class="{% if active_tab == 'dashboard' %}active{% endif %}">Dashboard</a></li>
+      <li><a href="/ui/upload" class="{% if active_tab == 'upload' %}active{% endif %}">New Application</a></li>
+      <li><a href="/ui/graph" class="{% if active_tab == 'graph' %}active{% endif %}">Fraud Graph</a></li>
+      <li><a href="/ui/integrity" class="{% if active_tab == 'integrity' %}active{% endif %}">Ledger Integrity</a></li>
+      <li><a href="/docs" target="_blank">API Docs</a></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

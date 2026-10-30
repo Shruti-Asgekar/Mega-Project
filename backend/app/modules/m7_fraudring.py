@@ -7,6 +7,7 @@ Module 7: Fraud Ring Graph Detection (NetworkX + Offline HTML Visualization).
 """
 
 import json
+import hashlib
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Set
 import networkx as nx
@@ -90,16 +91,20 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
         # Phone node
         phone = a.get("phone")
         if phone:
-            masked_p = mask_phone(phone)
-            phone_node = f"phone:{masked_p}"
+            clean_p = "".join(filter(str.isdigit, str(phone)))
+            masked_p = mask_phone(clean_p)
+            phone_hash = hashlib.sha256(clean_p.encode("utf-8")).hexdigest()[:12]
+            phone_node = f"phone:{phone_hash}"
             G.add_node(phone_node, node_type="identifier", label=masked_p, title=f"Phone: {masked_p}", color="#17a2b8", shape="diamond", size=14)
             G.add_edge(app_node, phone_node, relationship="HAS_PHONE")
 
         # Account node
         acc = a.get("account_number")
         if acc:
-            masked_acc = mask_account(acc)
-            acc_node = f"acc:{masked_acc}"
+            clean_acc = str(acc).strip()
+            masked_acc = mask_account(clean_acc)
+            acc_hash = hashlib.sha256(clean_acc.encode("utf-8")).hexdigest()[:12]
+            acc_node = f"acc:{acc_hash}"
             G.add_node(acc_node, node_type="identifier", label=masked_acc, title=f"Account: {masked_acc}", color="#28a745", shape="square", size=14)
             G.add_edge(app_node, acc_node, relationship="HAS_ACCOUNT")
 

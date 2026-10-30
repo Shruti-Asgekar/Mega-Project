@@ -1,0 +1,190 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Case Details: {{ case.applicant.name_masked }} — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
+  <div>
+    <div style="display:flex; align-items:center; gap: 12px; margin-bottom: 6px;">
+      <h1 style="font-size: 1.75rem; font-weight: 700;">{{ case.applicant.name_masked }}</h1>
+      {% if case.route == 'AUTO_CLEAR' %}
+        <span class="badge badge-green" style="font-size:0.9rem; padding:6px 14px;">AUTO CLEAR</span>
+      {% elif case.route == 'OFFICER_REVIEW' %}
+        <span class="badge badge-amber" style="font-size:0.9rem; padding:6px 14px;">OFFICER REVIEW</span>
+      {% else %}
+        <span class="badge badge-red" style="font-size:0.9rem; padding:6px 14px;">ESCALATE</span>
+      {% endif %}
+    </div>
+    <p style="color: var(--text-muted); font-size: 0.9rem;">
+      Case ID: <code>{{ case.id }}</code> &bull;
+      <span style="color:#1e40af; font-weight:600;">{{ consent_str }}</span>
+    </p>
+  </div>
+  <div style="display:flex; gap:12px; align-items:center;">
+    <button class="btn btn-secondary" onclick="rerunPipeline('{{ case.id }}')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Rerun Pipeline
+    </button>
+    <a href="/ui" class="btn btn-secondary">&larr; Back to Dashboard</a>
+  </div>
+</div>
+
+<!-- Score and Routing Hero Card -->
+<div class="card" style="display:grid; grid-template-columns: 140px 1fr; gap: 24px; align-items:center;">
+  <div style="text-align:center;">
+    {% if case.trust_score >= 80 %}
+      <div class="gauge gauge-green" style="width:90px;height:90px;font-size:1.9rem;margin:0 auto;">{{ case.trust_score }}</div>
+    {% elif case.trust_score >= 50 %}
+      <div class="gauge gauge-amber" style="width:90px;height:90px;font-size:1.9rem;margin:0 auto;">{{ case.trust_score }}</div>
+    {% else %}
+      <div class="gauge gauge-red" style="width:90px;height:90px;font-size:1.9rem;margin:0 auto;">{{ case.trust_score }}</div>
+    {% endif %}
+    <div style="font-size:0.8rem; font-weight:600; color:var(--text-muted); margin-top:8px;">TRUST SCORE</div>
+  </div>
+  <div>
+    <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 6px;">Automated Decision:
+      {% if case.route == 'AUTO_CLEAR' %}
+        <span style="color:var(--green);">Low Risk &mdash; Fast-Track Approval Recommended</span>
+      {% elif case.route == 'OFFICER_REVIEW' %}
+        <span style="color:var(--amber);">Medium Risk &mdash; Requires Human Officer Inspection</span>
+      {% else %}
+        <span style="color:var(--red);">High Risk &mdash; Immediate Escalation Triggered</span>
+      {% endif %}
+    </h3>
+    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 12px;">
+      Total score deductions: -{{ case.score_breakdown.summary.total_deductions|default(0) }} points across {{ flags_by_sev.red|length + flags_by_sev.amber|length }} risk flag(s).
+    </p>
+
+    {% if case.score_breakdown.breakdown %}
+    <div style="background:#f8fafc; border-radius:6px; padding:10px 14px; font-size:0.85rem; border:1px solid var(--border);">
+      <strong>Deduction Breakdown:</strong>
+      <ul style="margin-left: 20px; margin-top: 4px;">
+        {% for b in case.score_breakdown.breakdown %}
+        <li><span style="color:var(--red); font-weight:600;">-{{ b.deduction }} pts</span> [Module {{ b.module }}]: {{ b.reason }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Findings by Severity -->
+<div style="display:grid; grid-template-columns: 1fr; gap: 20px;">
+  <!-- Red Flags -->
+  {% if flags_by_sev.red %}
+  <div class="card" style="border-left: 6px solid var(--red);">
+    <h2 style="font-size: 1.15rem; font-weight: 700; color:var(--red); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Critical Severity Flags ({{ flags_by_sev.red|length }})
+    </h2>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for f in flags_by_sev.red %}
+      <div style="background:var(--red-bg); padding:12px 16px; border-radius:8px; border:1px solid #fecaca;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <strong style="color:#991b1b; font-size:0.9rem;">[Module {{ f.module }}] {{ f.code }}</strong>
+          <span class="badge badge-red">-{{ f.score_impact }} pts</span>
+        </div>
+        <p style="color:#7f1d1d; font-size:0.95rem;">{{ f.explanation }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Amber Flags -->
+  {% if flags_by_sev.amber %}
+  <div class="card" style="border-left: 6px solid var(--amber);">
+    <h2 style="font-size: 1.15rem; font-weight: 700; color:var(--amber); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Moderate Attention Flags ({{ flags_by_sev.amber|length }})
+    </h2>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for f in flags_by_sev.amber %}
+      <div style="background:var(--amber-bg); padding:12px 16px; border-radius:8px; border:1px solid #fde68a;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <strong style="color:#92400e; font-size:0.9rem;">[Module {{ f.module }}] {{ f.code }}</strong>
+          <span class="badge badge-amber">-{{ f.score_impact }} pts</span>
+        </div>
+        <p style="color:#78350f; font-size:0.95rem;">{{ f.explanation }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Green Checks -->
+  <div class="card" style="border-left: 6px solid var(--green);">
+    <h2 style="font-size: 1.15rem; font-weight: 700; color:var(--green); margin-bottom: 12px; display:flex; align-items:center; gap:8px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      Passed Checks & Verifications ({{ flags_by_sev.green|length }})
+    </h2>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+      {% for f in flags_by_sev.green %}
+      <div style="background:var(--green-bg); padding:10px 14px; border-radius:8px; border:1px solid #bbf7d0;">
+        <strong style="color:#166534; font-size:0.85rem; display:block;">[Module {{ f.module }}] {{ f.code }}</strong>
+        <span style="color:#14532d; font-size:0.9rem;">{{ f.explanation }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Uploaded Documents & Cryptographic Fingerprints -->
+<div class="card">
+  <h2 style="font-size: 1.2rem; font-weight: 600; margin-bottom: 14px;">Registered Documents & Cryptographic Hashes</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Document Type</th>
+        <th>Quality / Blur Score</th>
+        <th>SHA-256 Digest</th>
+        <th>Extracted Key Data (Masked)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for doc in case.documents %}
+      <tr>
+        <td style="font-weight:600; text-transform:capitalize;">{{ doc.doc_type|replace("_", " ") }}</td>
+        <td>
+          {% if doc.quality_score and doc.quality_score >= 100 %}
+            <span class="badge badge-green">{{ doc.quality_score|round(1) }} (Sharp)</span>
+          {% elif doc.quality_score and doc.quality_score >= 60 %}
+            <span class="badge badge-amber">{{ doc.quality_score|round(1) }} (Borderline)</span>
+          {% else %}
+            <span class="badge badge-red">{{ doc.quality_score|default(0)|round(1) }} (Blurry)</span>
+          {% endif %}
+        </td>
+        <td style="font-family:monospace; font-size:0.8rem; color:var(--text-muted);">{{ doc.sha256[:20] }}...</td>
+        <td style="font-size:0.85rem;">
+          {% for k, v in doc.masked_fields.items() %}
+            {% if v and k in ['name', 'dob', 'pan_number', 'aadhaar_number', 'net_salary'] %}
+              <div><strong>{{ k }}:</strong> {{ v }}</div>
+            {% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+async function rerunPipeline(caseId) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Rerunning Pipeline...';
+  try {
+    const res = await fetch(`/api/cases/${caseId}/rerun`, { method: 'POST' });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      alert('Rerun failed');
+      btn.disabled = false;
+    }
+  } catch (e) {
+    alert('Network error during rerun');
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

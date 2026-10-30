@@ -87,9 +87,13 @@ def contains_unmasked_aadhaar(text: str) -> bool:
     """
     Scans text for unmasked 12-digit Aadhaar patterns.
     Matches 12 consecutive digits or 4-4-4 separated digits where first digit is 2-9.
+    Excludes hex UUID segments or strings attached to hyphens/hex characters.
     """
     if not text:
         return False
-    # Pattern for 12 digits or 4-4-4 grouping
-    pattern = r'\b[2-9]\d{3}[-\s]?\d{4}[-\s]?\d{4}\b'
-    return bool(re.search(pattern, text))
+    matches = re.finditer(r'(?<![a-fA-F0-9\-])\b([2-9]\d{3}[-\s]?\d{4}[-\s]?\d{4})\b(?![a-fA-F0-9\-])', text)
+    for m in matches:
+        candidate = re.sub(r'[-\s]', '', m.group(1))
+        if len(candidate) == 12:
+            return True
+    return False

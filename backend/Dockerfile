@@ -1,19 +1,17 @@
-FROM node:20-alpine AS builder
+FROM python:3.11-slim
 
 WORKDIR /app
-COPY package*.json ./
-COPY prisma ./prisma/
-RUN npm ci
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
-RUN npx prisma generate
-RUN npm run build
 
-FROM node:20-alpine AS runner
-WORKDIR /app
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
+ENV PORT=8000
+EXPOSE 8000
 
-EXPOSE 5000
-CMD ["npm", "run", "start"]
+CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

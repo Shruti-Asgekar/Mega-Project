@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --accent: #2563eb;
+  }
+  * {
+    @apply border-gray-200 dark:border-gray-700;
+  }
+  body {
+    @apply antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white dark:bg-gray-900 rounded-2xl shadow-sm border p-6;
+  }
+  .btn-primary {
+    @apply bg-accent-600 hover:bg-accent-700 active:bg-accent-800 text-white font-semibold px-6 py-3 rounded-xl transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2;
+  }
+  .btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold px-6 py-3 rounded-xl transition-colors duration-200;
+  }
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-xl transition-colors duration-200;
+  }
+  .input {
+    @apply w-full px-4 py-3 rounded-xl border bg-white dark:bg-gray-800 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-accent-500 transition-colors duration-200 text-base;
+  }
+  .chip-green {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400;
+  }
+  .chip-amber {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;
+  }
+  .chip-red {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400;
+  }
+}

@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  APPLICANT
+  OFFICER
+  MANAGER
+  FRAUD_ANALYST
+  AUDITOR
+  ADMIN
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  PROCESSING
+  NEEDS_REVIEW
+  RECOMMENDED
+  APPROVED
+  REJECTED
+  MORE_DOCS_REQUESTED
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum DecisionKind {
+  RECOMMENDATION
+  FINAL
+}
+
+enum Severity {
+  green
+  amber
+  red
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  applications  Application[] @relation("ApplicantApplications")
+  assignedApps  Application[] @relation("AssignedOfficerApplications")
+  decisions     Decision[]
+  consents      ConsentRecord[]
+  auditLogs     AuditLog[]
+}
+
+model Application {
+  id                String            @id @default(uuid())
+  applicantId       String
+  applicant         User              @relation("ApplicantApplications", fields: [applicantId], references: [id])
+  assignedOfficerId String?
+  assignedOfficer   User?             @relation("AssignedOfficerApplications", fields: [assignedOfficerId], references: [id])
+  status            ApplicationStatus @default(DRAFT)
+  riskScore         Float?
+  routing           String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  documents    Document[]
+  findings     Finding[]
+  decisions    Decision[]
+  consents     ConsentRecord[]
+  auditLogs    AuditLog[]
+  jobs         ProcessingJob[]
+}
+
+model Document {
+  id            String  @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  type          String
+  filePath      String
+  sha256        String
+  ocrText       String? @db.Text
+  confidence    Float?
+  status        String  @default("PENDING")
+  createdAt     DateTime @default(now())
+
+  extractedFields ExtractedField[]
+  findings        Finding[]
+  ledgerEntry     LedgerEntry?
+}
+
+model ExtractedField {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name       String
+  value      String
+  valid      Boolean  @default(true)
+  confidence Float
+  createdAt  DateTime @default(now())
+}
+
+model Finding {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  documentId    String?
+  document      Document?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  module        Int
+  check         String
+  severity      Severity
+  reasonCode    String
+  confidence    Float
+  evidenceJson  Json
+  createdAt     DateTime    @default(now())
+}
+
+model Decision {
+  id            String       @id @default(uuid())
+  applicationId String
+  application   Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  kind          DecisionKind
+  outcome       String
+  reason        String       @db.Text
+  createdAt     DateTime     @default(now())
+}
+
+model ConsentRecord {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  text          String      @db.Text
+  grantedAt     DateTime    @default(now())
+}
+
+model AuditLog {
+  id            String      @id @default(uuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  action        String
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  metadataJson  Json?
+  createdAt     DateTime    @default(now())
+}
+
+model LedgerEntry {
+  id         String   @id @default(uuid())
+  index      Int      @unique
+  documentId String   @unique
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  fileSha256 String
+  prevHash   String
+  entryHash  String
+  createdAt  DateTime @default(now())
+}
+
+model ProcessingJob {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  status        JobStatus   @default(QUEUED)
+  step          String
+  error         String?     @db.Text
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+}

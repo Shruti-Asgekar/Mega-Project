@@ -46,14 +46,41 @@ def restore_file(file_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Tamper-evident demonstration tool")
-    parser.add_argument("file_path", help="Path to document file to tamper/restore")
+    parser.add_argument("file_path", nargs="?", default=None, help="Path to document file to tamper/restore (optional)")
     parser.add_argument("--restore", action="store_true", help="Restore file to original untampered state")
 
     args = parser.parse_args()
+    target_path = args.file_path
+    if not target_path:
+        # Auto-pick first verified document from database or samples
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from backend.app.db.database import SessionLocal
+            from backend.app.db.models import Document
+            db = SessionLocal()
+            doc = db.query(Document).filter(Document.file_path.isnot(None)).first()
+            if doc and Path(doc.file_path).exists():
+                target_path = doc.file_path
+            db.close()
+        except Exception:
+            pass
+
+        if not target_path:
+            samples_dir = Path(__file__).resolve().parent / "samples"
+            files = [f for f in samples_dir.glob("*.pdf") if not f.name.endswith(".bak")]
+            if files:
+                target_path = str(files[0])
+
+        if not target_path:
+            print("Error: No document files found to tamper.")
+            sys.exit(1)
+
+        print(f"[TAMPER] Auto-selected document: {target_path}")
+
     if args.restore:
-        restore_file(args.file_path)
+        restore_file(target_path)
     else:
-        tamper_file(args.file_path)
+        tamper_file(target_path)
 
 if __name__ == "__main__":
     main()
