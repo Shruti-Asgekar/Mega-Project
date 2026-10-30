@@ -3,8 +3,11 @@ FastAPI Backend Application Entrypoint.
 Runs on port 8000 (or $PORT from environment).
 """
 
+import os
 import sys
+import time
 import logging
+import threading
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -22,32 +25,46 @@ from backend.app.api.routes import router as api_router
 from backend.app.api.ui_routes import ui_router
 
 logger = logging.getLogger("kyc.backend")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 1. Initialize DB schema with retry
-    init_db()
-
-    # 2. Check automatic seeding on startup
-    if SEED_ON_START:
+def _run_background_seeder():
+    """Runs database demo seeding asynchronously in background without blocking server startup."""
+    try:
+        # Give Uvicorn 2 seconds to bind port and answer initial Render health checks
+        time.sleep(2)
         db = SessionLocal()
         try:
             case_count = db.query(Case).count()
             if case_count == 0:
-                logger.info("[Startup] Database is empty and SEED_ON_START=true. Executing synthetic demo seeder...")
+                print("[Startup:Background] Database is empty and SEED_ON_START=true. Executing synthetic demo seeder...", flush=True)
                 data_gen_path = Path(__file__).resolve().parent.parent / "data-generator"
                 if str(data_gen_path) not in sys.path:
                     sys.path.insert(0, str(data_gen_path))
                 from generate import seed_database
-                seed_database(reset=False, benign_count=12)
-                logger.info("[Startup] Seeding complete! Database ready for demo visitors.")
+                seed_database(reset=False, benign_count=2)
+                print("[Startup:Background] Seeding complete! Database ready for demo visitors.", flush=True)
             else:
-                logger.info(f"[Startup] Found {case_count} existing case(s). Skipping auto-seeding.")
+                print(f"[Startup:Background] Found {case_count} existing case(s). Skipping auto-seeding.", flush=True)
         except Exception as e:
-            logger.error(f"[Startup] Error during startup seeding: {e}")
+            print(f"[Startup:Background] Error during background seeding: {e}", flush=True)
         finally:
             db.close()
+    except Exception as e:
+        print(f"[Startup:Background] Fatal background thread error: {e}", flush=True)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Initialize DB schema with retry (fast)
+    init_db()
+
+    # 2. Trigger non-blocking background seeding so Uvicorn binds port immediately
+    if SEED_ON_START:
+        t = threading.Thread(target=_run_background_seeder, daemon=True)
+        t.start()
 
     yield
 
@@ -89,4 +106,5 @@ app.include_router(ui_router, tags=["Web UI"])
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=BACKEND_PORT, workers=1)
+    port = int(os.environ.get("PORT", os.environ.get("BACKEND_PORT", 8000)))
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, workers=1)
