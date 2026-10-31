@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Query
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -32,12 +32,12 @@ router = APIRouter()
 # --------------------------------------------------------------------------
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     full_name: str = Field(..., min_length=2, max_length=100)
     password: str = Field(..., min_length=10)
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str
 
 class ChangePasswordRequest(BaseModel):
