@@ -6,22 +6,118 @@
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
   <div>
     <h1 style="font-size: 1.75rem; font-weight: 700;">Fraud Ring Syndicate Detection Graph</h1>
-    <p style="color: var(--text-muted); font-size: 0.95rem;">Bipartite NetworkX analysis clustering applicants through shared phone numbers, bank accounts, and addresses (RapidFuzz &ge; 92% match).</p>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Client-rendered graph clustering applicants through shared phone numbers, bank accounts, and addresses (RapidFuzz &ge; 92% match).</p>
   </div>
-  <a href="/api/graph" target="_blank" class="btn btn-secondary">Open Standalone Graph &nearr;</a>
+  <div style="display:flex; gap:10px;">
+    <button onclick="loadGraph()" class="btn btn-secondary">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Refresh Graph
+    </button>
+    <a href="/api/graph/data" target="_blank" class="btn btn-secondary">Raw JSON &nearr;</a>
+  </div>
 </div>
 
-<div class="card" style="padding: 0; overflow: hidden; height: 650px; position:relative;">
-  <iframe src="/api/graph" style="width: 100%; height: 100%; border: none;"></iframe>
+<!-- Graph Status & Metrics Header -->
+<div id="graph-stats" style="display:flex; gap:16px; margin-bottom:16px;">
+  <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:10px 16px; flex:1;">
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Entities / Identifiers</div>
+    <div id="stat-nodes" style="font-size:1.4rem; font-weight:700; color:var(--text);">-</div>
+  </div>
+  <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:10px 16px; flex:1;">
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Credential Links</div>
+    <div id="stat-edges" style="font-size:1.4rem; font-weight:700; color:var(--text);">-</div>
+  </div>
+  <div style="background:white; border:1px solid var(--border); border-radius:8px; padding:10px 16px; flex:1;">
+    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Syndicates Detected (&ge; 3 applicants)</div>
+    <div id="stat-rings" style="font-size:1.4rem; font-weight:700; color:var(--red);">-</div>
+  </div>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden; height: 600px; position:relative; background:#ffffff;">
+  <div id="graph-loading" style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted);">
+    <div style="font-size:1.1rem; font-weight:600; margin-bottom:8px;">Analyzing applicant connections...</div>
+    <div style="font-size:0.85rem;">Retrieving credential graph from memory cache</div>
+  </div>
+  <div id="graph-empty" style="display:none; flex-direction:column; align-items:center; justify-content:center; height:100%; text-align:center; padding:20px;">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" style="margin-bottom:12px;"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 14.14 14.14"/></svg>
+    <h3 style="font-size:1.15rem; font-weight:600; margin-bottom:6px;">No Graph Entities Found</h3>
+    <p style="color:var(--text-muted); font-size:0.9rem; max-width:400px; margin-bottom:16px;">No applicant records or shared identifiers are currently registered in the database.</p>
+    <a href="/ui/upload" class="btn btn-primary btn-sm">Submit New Application</a>
+  </div>
+  <div id="network-container" style="width: 100%; height: 100%;"></div>
 </div>
 
 <div class="card">
-  <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 8px;">Automated Syndicate Cluster Rules</h2>
-  <ul style="margin-left: 20px; font-size: 0.9rem; color: var(--text-muted); line-height: 1.6;">
-    <li><strong style="color:var(--red);">Red Node (Fraud Ring Suspected):</strong> Connected component contains &ge; 3 distinct applicants sharing credentials. Triggers automatic case escalation (-35 trust score deduction).</li>
-    <li><strong style="color:var(--amber);">Orange Node (Shared Identifier):</strong> Exactly 2 applicants share an identifier. Triggers amber review alert (-8 trust score deduction).</li>
-    <li><strong style="color:var(--text-muted);">Grey Node:</strong> Standalone benign applicant with no shared credentials.</li>
-    <li>All sensitive identifiers displayed in node tooltips are strictly masked (no plaintext Aadhaar/PAN/Account numbers).</li>
-  </ul>
+  <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 8px;">Syndicate Cluster Rules & Node Legend</h2>
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; font-size:0.88rem; color:var(--text-muted); line-height:1.6;">
+    <div>
+      <p><strong style="color:var(--red);">&#9679; Red Node (Fraud Ring Suspected):</strong> Connected component contains &ge; 3 distinct applicants sharing credentials. Triggers automatic case escalation (-35 trust score deduction).</p>
+      <p style="margin-top:6px;"><strong style="color:var(--amber);">&#9679; Orange Node (Shared Credential):</strong> Exactly 2 applicants share an identifier. Triggers amber review alert (-8 trust score deduction).</p>
+    </div>
+    <div>
+      <p><strong style="color:#64748b;">&#9679; Grey Node (Benign Applicant):</strong> Standalone applicant with zero shared credentials.</p>
+      <p style="margin-top:6px;"><strong style="color:#2563eb;">&#9632; Blue/Cyan Nodes:</strong> Shared entity attributes (masked phone, normalized address, or bank account).</p>
+    </div>
+  </div>
 </div>
+
+<!-- Load Vis.js locally bundled from static (no CDN, zero network delay) -->
+<script src="/static/js/vis-network.min.js"></script>
+
+<script>
+let network = null;
+
+async function loadGraph() {
+  const loading = document.getElementById('graph-loading');
+  const empty = document.getElementById('graph-empty');
+  const container = document.getElementById('network-container');
+
+  loading.style.display = 'flex';
+  empty.style.display = 'none';
+
+  try {
+    const data = await apiFetch('/api/graph/data');
+    loading.style.display = 'none';
+
+    document.getElementById('stat-nodes').textContent = data.nodes ? data.nodes.length : 0;
+    document.getElementById('stat-edges').textContent = data.edges ? data.edges.length : 0;
+    document.getElementById('stat-rings').textContent = data.ring_count || 0;
+
+    if (!data.nodes || data.nodes.length === 0) {
+      empty.style.display = 'flex';
+      if (network) { network.destroy(); network = null; }
+      return;
+    }
+
+    const options = {
+      nodes: {
+        shape: 'dot',
+        size: 16,
+        font: { size: 12, face: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto' },
+        borderWidth: 2,
+        shadow: true
+      },
+      edges: {
+        width: 1.5,
+        color: { color: '#cbd5e1', highlight: '#2563eb' },
+        smooth: { type: 'continuous' }
+      },
+      physics: {
+        stabilization: { iterations: 120 },
+        barnesHut: { gravitationalConstant: -3000, springLength: 95 }
+      },
+      interaction: { hover: true, tooltipDelay: 100 }
+    };
+
+    network = new vis.Network(container, { nodes: data.nodes, edges: data.edges }, options);
+  } catch (err) {
+    loading.style.display = 'none';
+    empty.style.display = 'flex';
+    empty.querySelector('h3').textContent = 'Graph Load Error';
+    empty.querySelector('p').textContent = err.message || 'Unable to retrieve fraud graph data.';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadGraph);
+</script>
 {% endblock %}

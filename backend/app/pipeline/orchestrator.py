@@ -162,253 +162,304 @@ def call_ml_service_forgery(file_bytes: bytes, filename: str) -> tuple[List[Flag
 def run_case_pipeline(case_id: str, db: Session) -> Case:
     """
     Executes all verification stages for a case.
-    Replaces existing flags (idempotent).
+    Replaces existing flags (idempotent). Updates pipeline_status and pipeline_step.
     """
     case = db.query(Case).filter(Case.id == case_id).first()
     if not case:
         raise ValueError(f"Case {case_id} not found")
 
-    # Clear previous flags for idempotency
-    db.query(FlagModel).filter(FlagModel.case_id == case_id).delete()
+    case.pipeline_status = "running"
+    case.pipeline_step = "EXTRACTING"
+    case.pipeline_error = None
     db.commit()
 
-    all_flags: List[Flag] = []
-    blur_results_map: Dict[str, dict] = {}
-    docs_metadata_list = []
-    degraded_mode_used = False
+    try:
+        # Clear previous flags for idempotency
+        db.query(FlagModel).filter(FlagModel.case_id == case_id).delete()
+        db.commit()
 
-    # Track extracted aggregates
-    slip_net_salary = None
-    employer = None
-    bank_transactions: List[Transaction] = []
+        all_flags: List[Flag] = []
+        blur_results_map: Dict[str, dict] = {}
+        docs_metadata_list = []
+        degraded_mode_used = False
 
-    # 1. Document Extraction & Pre-Processing
-    for doc in case.documents:
-        file_bytes = get_document_bytes(db, doc.id)
-        if file_bytes is None:
+        # Track extracted aggregates
+        slip_net_salary = None
+        employer = None
+        bank_transactions: List[Transaction] = []
+
+        # 1. Document Extraction & Pre-Processing
+        for doc in case.documents:
+            file_bytes = get_document_bytes(db, doc.id)
+            if file_bytes is None:
+                all_flags.append(
+                    Flag(
+                        code=FlagCode.DOC_UNREADABLE,
+                        module=2,
+                        severity=Severity.RED,
+                        score_impact=25,
+                        details={"document_id": doc.id, "error": "Document data missing from storage."},
+                        document_id=doc.id
+                    )
+                )
+                continue
+
+            filename = os.path.basename(doc.file_path) if (doc.file_path and not doc.file_path.startswith("db://")) else f"{doc.id}_{doc.doc_type}"
+            blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == doc.id).first()
+            if blob and blob.filename:
+                filename = blob.filename
+
+            try:
+                # Ensure document is in hash chain
+                append_document_to_chain(db, doc)
+
+                # Quality / Blur Check
+                blur_res, degraded = call_ml_service_blur(file_bytes, filename)
+                if degraded:
+                    degraded_mode_used = True
+                blur_results_map[doc.id] = blur_res
+                doc.quality_score = blur_res.get("blur_score", 100.0)
+
+                # Forgery Meta Check (M6)
+                forg_flags, degraded_f = call_ml_service_forgery(file_bytes, filename)
+                if degraded_f:
+                    degraded_mode_used = True
+                for ff in forg_flags:
+                    ff.document_id = doc.id
+                all_flags.extend(forg_flags)
+
+                # Text / Fields Extraction
+                fields, degraded_e = call_ml_service_extract(file_bytes, filename, doc.doc_type)
+                if degraded_e:
+                    degraded_mode_used = True
+
+                # If user already entered confirmation fields, preserve and merge
+                existing_extracted = doc.extracted_json or {}
+                merged_fields = fields.model_dump()
+                for k, v in existing_extracted.items():
+                    if v and not merged_fields.get(k):
+                        merged_fields[k] = v
+
+                doc.extracted_json = merged_fields
+                doc.masked_fields = mask_extracted_fields(merged_fields)
+
+                # Parse CSV bank statements if applicable
+                if doc.doc_type == "bank_statement" and filename.lower().endswith(".csv"):
+                    try:
+                        csv_text = file_bytes.decode("utf-8", errors="ignore")
+                        bank_transactions = parse_bank_transactions_from_csv(csv_text)
+                    except Exception:
+                        pass
+
+                if doc.doc_type == "salary_slip":
+                    if merged_fields.get("net_salary"):
+                        slip_net_salary = float(merged_fields["net_salary"])
+                    if merged_fields.get("employer"):
+                        employer = merged_fields["employer"]
+
+                    # Slip arithmetic check (M6)
+                    arith_flags = verify_salary_slip_arithmetic(
+                        gross=merged_fields.get("gross_salary"),
+                        deductions=merged_fields.get("total_deductions"),
+                        net=merged_fields.get("net_salary"),
+                        basic=merged_fields.get("basic_pay"),
+                        hra=merged_fields.get("hra"),
+                        allowances=merged_fields.get("allowances"),
+                        pf=merged_fields.get("pf"),
+                        tax=merged_fields.get("tax"),
+                        other_deductions=merged_fields.get("other_deductions"),
+                        document_id=doc.id
+                    )
+                    all_flags.extend(arith_flags)
+
+                docs_metadata_list.append({
+                    "id": doc.id,
+                    "doc_type": doc.doc_type,
+                    "file_path": doc.file_path,
+                    "extracted_fields": merged_fields
+                })
+
+                # M1 Field Validators on this document
+                if merged_fields.get("pan_number"):
+                    all_flags.extend(validate_pan(merged_fields["pan_number"], document_id=doc.id))
+                if merged_fields.get("aadhaar_number"):
+                    all_flags.extend(validate_aadhaar(merged_fields["aadhaar_number"], document_id=doc.id))
+                if merged_fields.get("ifsc"):
+                    all_flags.extend(validate_ifsc(merged_fields["ifsc"], document_id=doc.id))
+                if merged_fields.get("dob"):
+                    all_flags.extend(validate_dob(merged_fields["dob"], document_id=doc.id))
+
+            except Exception as e:
+                logger.error(f"Error processing doc {doc.id}: {e}")
+                all_flags.append(
+                    Flag(
+                        code=FlagCode.DOC_UNREADABLE,
+                        module=2,
+                        severity=Severity.RED,
+                        score_impact=20,
+                        details={"document_id": doc.id, "error": str(e)},
+                        document_id=doc.id
+                    )
+                )
+
+        # 2. Module 2: Quality & Completeness Evaluation
+        case.pipeline_step = "QUALITY"
+        db.commit()
+        m2_flags = evaluate_quality_and_completeness(case.documents, blur_results_map)
+        all_flags.extend(m2_flags)
+
+        # If degraded mode was used at any point (HTTP mode failure), record flag
+        if degraded_mode_used:
             all_flags.append(
                 Flag(
-                    code=FlagCode.DOC_UNREADABLE,
+                    code=FlagCode.DOC_ANALYSIS_DEGRADED,
                     module=2,
-                    severity=Severity.RED,
-                    score_impact=25,
-                    details={"document_id": doc.id, "error": "Document data missing from storage."},
-                    document_id=doc.id
+                    severity=Severity.AMBER,
+                    score_impact=5,
+                    details={"message": "Heavy ML service unreachable; processed using in-process lightweight fallback."}
                 )
             )
-            continue
 
-        filename = os.path.basename(doc.file_path) if (doc.file_path and not doc.file_path.startswith("db://")) else f"{doc.id}_{doc.doc_type}"
-        blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == doc.id).first()
-        if blob and blob.filename:
-            filename = blob.filename
+        # 3. Module 4: Cross-Document Consistency Verification
+        case.pipeline_step = "CROSS_DOC"
+        db.commit()
+        if len(docs_metadata_list) >= 2:
+            m4_flags = verify_cross_documents(docs_metadata_list)
+            all_flags.extend(m4_flags)
 
-        try:
-            # Ensure document is in hash chain
-            append_document_to_chain(db, doc)
+        # 4. Module 5: Income & Bank Statement Analyzer
+        case.pipeline_step = "INCOME"
+        db.commit()
+        for d in docs_metadata_list:
+            ext_txs = d["extracted_fields"].get("transactions", [])
+            for t in ext_txs:
+                bank_transactions.append(Transaction(**t))
 
-            # Quality / Blur Check
-            blur_res, degraded = call_ml_service_blur(file_bytes, filename)
-            if degraded:
-                degraded_mode_used = True
-            blur_results_map[doc.id] = blur_res
-            doc.quality_score = blur_res.get("blur_score", 100.0)
+        m5_flags, m5_metrics = analyze_bank_statement_and_income(
+            transactions=bank_transactions,
+            slip_net_salary=slip_net_salary,
+            employer=employer
+        )
+        all_flags.extend(m5_flags)
 
-            # Forgery Meta Check (M6)
-            forg_flags, degraded_f = call_ml_service_forgery(file_bytes, filename)
-            if degraded_f:
-                degraded_mode_used = True
-            for ff in forg_flags:
-                ff.document_id = doc.id
-            all_flags.extend(forg_flags)
-
-            # Text / Fields Extraction
-            fields, degraded_e = call_ml_service_extract(file_bytes, filename, doc.doc_type)
-            if degraded_e:
-                degraded_mode_used = True
-
-            # If user already entered confirmation fields, preserve and merge
-            existing_extracted = doc.extracted_json or {}
-            merged_fields = fields.model_dump()
-            for k, v in existing_extracted.items():
-                if v and not merged_fields.get(k):
-                    merged_fields[k] = v
-
-            doc.extracted_json = merged_fields
-            doc.masked_fields = mask_extracted_fields(merged_fields)
-
-            # Parse CSV bank statements if applicable
-            if doc.doc_type == "bank_statement" and filename.lower().endswith(".csv"):
-                try:
-                    csv_text = file_bytes.decode("utf-8", errors="ignore")
-                    bank_transactions = parse_bank_transactions_from_csv(csv_text)
-                except Exception:
-                    pass
-
-            if doc.doc_type == "salary_slip":
-                if merged_fields.get("net_salary"):
-                    slip_net_salary = float(merged_fields["net_salary"])
-                if merged_fields.get("employer"):
-                    employer = merged_fields["employer"]
-
-                # Slip arithmetic check (M6)
-                arith_flags = verify_salary_slip_arithmetic(
-                    gross=merged_fields.get("gross_salary"),
-                    deductions=merged_fields.get("total_deductions"),
-                    net=merged_fields.get("net_salary"),
-                    basic=merged_fields.get("basic_pay"),
-                    hra=merged_fields.get("hra"),
-                    allowances=merged_fields.get("allowances"),
-                    pf=merged_fields.get("pf"),
-                    tax=merged_fields.get("tax"),
-                    other_deductions=merged_fields.get("other_deductions"),
-                    document_id=doc.id
-                )
-                all_flags.extend(arith_flags)
-
-            docs_metadata_list.append({
-                "id": doc.id,
-                "doc_type": doc.doc_type,
-                "file_path": doc.file_path,
-                "extracted_fields": merged_fields
+        # 5. Module 7: Fraud Ring Graph Analysis
+        case.pipeline_step = "FRAUD_GRAPH"
+        db.commit()
+        all_applicants = db.query(Applicant).all()
+        apps_data = []
+        for appl in all_applicants:
+            phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else ""
+            addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else ""
+            c_inst = appl.cases[0] if appl.cases else None
+            acc = None
+            if c_inst:
+                for d in c_inst.documents:
+                    ex = d.extracted_json or {}
+                    if ex.get("phone") and not phone:
+                        phone = ex["phone"]
+                    if ex.get("address") and not addr:
+                        addr = ex["address"]
+                    if ex.get("account_number") and not acc:
+                        acc = ex["account_number"]
+            apps_data.append({
+                "applicant_id": appl.id,
+                "case_id": c_inst.id if c_inst else appl.id,
+                "name_masked": appl.name_masked,
+                "phone": phone,
+                "address": addr,
+                "account_number": acc
             })
 
-            # M1 Field Validators on this document
-            if merged_fields.get("pan_number"):
-                all_flags.extend(validate_pan(merged_fields["pan_number"], document_id=doc.id))
-            if merged_fields.get("aadhaar_number"):
-                all_flags.extend(validate_aadhaar(merged_fields["aadhaar_number"], document_id=doc.id))
-            if merged_fields.get("ifsc"):
-                all_flags.extend(validate_ifsc(merged_fields["ifsc"], document_id=doc.id))
-            if merged_fields.get("dob"):
-                all_flags.extend(validate_dob(merged_fields["dob"], document_id=doc.id))
+        _, fraud_flags, _ = build_fraud_graph(apps_data)
+        for ff in fraud_flags:
+            if ff.details.get("applicant_id") == case.applicant_id:
+                all_flags.append(ff)
 
-        except Exception as e:
-            logger.error(f"Error processing doc {doc.id}: {e}")
-            all_flags.append(
-                Flag(
-                    code=FlagCode.DOC_UNREADABLE,
-                    module=2,
-                    severity=Severity.RED,
-                    score_impact=20,
-                    details={"document_id": doc.id, "error": str(e)},
-                    document_id=doc.id
-                )
-            )
+        # 6. M10 Hash Chain Integrity Verification
+        case.pipeline_step = "HASH_CHAIN"
+        db.commit()
+        integrity_flags = verify_case_integrity(db, case_id)
+        all_flags.extend(integrity_flags)
 
-    # 2. Module 2: Quality & Completeness Evaluation
-    m2_flags = evaluate_quality_and_completeness(case.documents, blur_results_map)
-    all_flags.extend(m2_flags)
+        # 7. M8 Plain-English Explanation Generation
+        case.pipeline_step = "ROUTING"
+        db.commit()
+        for f in all_flags:
+            f.explanation = render_flag_explanation(f)
 
-    # If degraded mode was used at any point (HTTP mode failure), record flag
-    if degraded_mode_used:
-        all_flags.append(
-            Flag(
-                code=FlagCode.DOC_ANALYSIS_DEGRADED,
-                module=2,
-                severity=Severity.AMBER,
-                score_impact=5,
-                details={"message": "Heavy ML service unreachable; processed using in-process lightweight fallback."}
-            )
-        )
+        # 8. M9 Trust Score and Smart Routing
+        score, route, breakdown, summary = calculate_trust_score_and_route(all_flags)
 
-    # 3. Module 4: Cross-Document Consistency Verification
-    if len(docs_metadata_list) >= 2:
-        m4_flags = verify_cross_documents(docs_metadata_list)
-        all_flags.extend(m4_flags)
-
-    # 4. Module 5: Income & Bank Statement Analyzer
-    # Merge extracted transactions if any
-    for d in docs_metadata_list:
-        ext_txs = d["extracted_fields"].get("transactions", [])
-        for t in ext_txs:
-            bank_transactions.append(Transaction(**t))
-
-    m5_flags, m5_metrics = analyze_bank_statement_and_income(
-        transactions=bank_transactions,
-        slip_net_salary=slip_net_salary,
-        employer=employer
-    )
-    all_flags.extend(m5_flags)
-
-    # 5. Module 7: Fraud Ring Graph Analysis
-    # Load all applicants and cases to build the cross-applicant graph
-    all_applicants = db.query(Applicant).all()
-    apps_data = []
-    for appl in all_applicants:
-        phone = decrypt_value(appl.phone_encrypted) if appl.phone_encrypted else ""
-        addr = decrypt_value(appl.address_encrypted) if appl.address_encrypted else ""
-        c_inst = appl.cases[0] if appl.cases else None
-        acc = None
-        if c_inst:
-            for d in c_inst.documents:
-                ex = d.extracted_json or {}
-                if ex.get("phone") and not phone:
-                    phone = ex["phone"]
-                if ex.get("address") and not addr:
-                    addr = ex["address"]
-                if ex.get("account_number") and not acc:
-                    acc = ex["account_number"]
-        apps_data.append({
-            "applicant_id": appl.id,
-            "case_id": c_inst.id if c_inst else appl.id,
-            "name_masked": appl.name_masked,
-            "phone": phone,
-            "address": addr,
-            "account_number": acc
-        })
-
-    _, fraud_flags, _ = build_fraud_graph(apps_data)
-    # Filter fraud flags matching this applicant
-    for ff in fraud_flags:
-        if ff.details.get("applicant_id") == case.applicant_id:
-            all_flags.append(ff)
-
-    # 6. M10 Hash Chain Integrity Verification
-    integrity_flags = verify_case_integrity(db, case_id)
-    all_flags.extend(integrity_flags)
-
-    # 7. M8 Plain-English Explanation Generation
-    for f in all_flags:
-        f.explanation = render_flag_explanation(f)
-
-    # 8. M9 Trust Score and Smart Routing
-    score, route, breakdown, summary = calculate_trust_score_and_route(all_flags)
-
-    case.trust_score = score
-    case.route = route.value
-    case.status = "COMPLETED"
-    case.score_breakdown = {
-        "summary": summary,
-        "breakdown": breakdown
-    }
-
-    # Save flags into FlagModel
-    for f in all_flags:
-        fm = FlagModel(
-            case_id=case.id,
-            document_id=f.document_id,
-            code=f.code.value,
-            module=f.module,
-            severity=f.severity.value,
-            score_impact=f.score_impact,
-            details=f.details or {},
-            explanation=f.explanation
-        )
-        db.add(fm)
-
-    # Audit log
-    audit = AuditLog(
-        case_id=case.id,
-        action="PIPELINE_EXECUTED",
-        details={
-            "score": score,
-            "route": route.value,
-            "flag_count": len(all_flags)
+        case.trust_score = score
+        case.route = route.value
+        case.status = "COMPLETED"
+        case.score_breakdown = {
+            "summary": summary,
+            "breakdown": breakdown
         }
-    )
-    db.add(audit)
 
-    db.commit()
-    db.refresh(case)
-    return case
+        # Save flags into FlagModel
+        for f in all_flags:
+            fm = FlagModel(
+                case_id=case.id,
+                document_id=f.document_id,
+                code=f.code.value,
+                module=f.module,
+                severity=f.severity.value,
+                score_impact=f.score_impact,
+                details=f.details or {},
+                explanation=f.explanation
+            )
+            db.add(fm)
+
+        # Audit log
+        audit = AuditLog(
+            case_id=case.id,
+            action="PIPELINE_EXECUTED",
+            details={
+                "score": score,
+                "route": route.value,
+                "flag_count": len(all_flags)
+            }
+        )
+        db.add(audit)
+
+        case.pipeline_status = "done"
+        case.pipeline_step = "COMPLETED"
+        case.pipeline_error = None
+        db.commit()
+        db.refresh(case)
+
+        # Invalidate fraud ring graph cache
+        try:
+            from backend.app.modules.m7_fraudring import invalidate_graph_cache
+            invalidate_graph_cache()
+        except Exception:
+            pass
+
+        return case
+
+    except Exception as e:
+        logger.exception(f"Pipeline execution failed for case {case_id}: {e}")
+        try:
+            db.rollback()
+            case = db.query(Case).filter(Case.id == case_id).first()
+            if case:
+                case.pipeline_status = "failed"
+                case.pipeline_error = str(e)
+                db.commit()
+        except Exception:
+            pass
+        raise
+
+
+def run_case_pipeline_background(case_id: str) -> None:
+    """Entrypoint for FastAPI BackgroundTasks with isolated DB session."""
+    from backend.app.db.database import SessionLocal
+    db = SessionLocal()
+    try:
+        run_case_pipeline(case_id, db)
+    except Exception as exc:
+        logger.error(f"Background pipeline execution error for case {case_id}: {exc}")
+    finally:
+        db.close()

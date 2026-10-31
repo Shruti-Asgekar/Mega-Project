@@ -1,91 +1,136 @@
 """
-Module 7: Fraud Ring Graph Detection (NetworkX + Offline HTML Visualization).
-- Constructs bipartite graph connecting Applicant nodes with Identifier nodes (Phone, Account, Address)
-- Clusters addresses using RapidFuzz token_set_ratio >= 92
-- Detects suspected fraud rings (>= 3 linked applicants -> RED) and shared identifiers (2 applicants -> AMBER)
-- Produces self-contained offline HTML graph (vis-network) with masked tooltips
+Module 7: Fraud Ring & Syndicate Detection (Bipartite Graph Network).
+Constructs a NetworkX graph linking applicants to shared identifiers:
+- Phone numbers (HMAC / masked)
+- Bank account numbers (HMAC / masked)
+- Normalised addresses via RapidFuzz similarity (>= 92%)
+
+Rules:
+- Connected components with >= 3 applicants -> Red Flag: FRAUD_RING_SUSPECTED (-35 points, Escalate)
+- Connected components with == 2 applicants -> Amber Flag: SHARED_IDENTIFIER (-8 points, Review)
+- In-memory caching and node capping for production performance (< 2s, < 50MB).
 """
 
-import json
+import time
+import logging
 import hashlib
 from collections import defaultdict
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Optional
 import networkx as nx
 from rapidfuzz import fuzz
+
 from backend.app.core.contracts import Flag, FlagCode, Severity
-from backend.app.core.security import mask_phone, mask_account, mask_aadhaar
+from backend.app.core.security import mask_phone, mask_account, compute_identifier_hmac
 
-def cluster_addresses(addresses: List[Tuple[str, str]], threshold: float = 92.0) -> Dict[str, str]:
-    """
-    Clusters normalized addresses using RapidFuzz >= 92.
-    addresses: list of (applicant_id, normalized_address)
-    Returns mapping from applicant_id to cluster_id.
-    """
-    clusters: Dict[str, str] = {}
-    cluster_representatives: Dict[str, str] = {} # cluster_id -> representative_str
-    cluster_counter = 1
+logger = logging.getLogger("kyc.fraudring")
 
-    for app_id, addr in addresses:
-        if not addr or len(addr.strip()) < 5:
+# Global in-memory cache for graph JSON
+_GRAPH_CACHE: Dict[str, Any] = {
+    "data": None,
+    "timestamp": 0.0
+}
+CACHE_TTL_SECS = 300.0  # 5 minutes
+
+def invalidate_graph_cache():
+    """Invalidates cached graph JSON structure when new cases arrive."""
+    global _GRAPH_CACHE
+    _GRAPH_CACHE["data"] = None
+    _GRAPH_CACHE["timestamp"] = 0.0
+    logger.debug("[GraphCache] Cache invalidated.")
+
+def cluster_addresses(addresses: List[str], threshold: int = 92) -> List[List[str]]:
+    """Clusters similar addresses using RapidFuzz similarity ratio."""
+    clusters = []
+    visited = set()
+    for i, a1 in enumerate(addresses):
+        if i in visited:
             continue
-        matched_cluster = None
-        for cid, rep in cluster_representatives.items():
-            if fuzz.token_set_ratio(addr.lower(), rep.lower()) >= threshold:
-                matched_cluster = cid
-                break
-        if matched_cluster:
-            clusters[app_id] = matched_cluster
-        else:
-            new_cid = f"addr_cluster_{cluster_counter}"
-            cluster_counter += 1
-            cluster_representatives[new_cid] = addr
-            clusters[app_id] = new_cid
-
+        current_cluster = [a1]
+        visited.add(i)
+        for j, a2 in enumerate(addresses):
+            if j not in visited and fuzz.ratio(a1.lower(), a2.lower()) >= threshold:
+                current_cluster.append(a2)
+                visited.add(j)
+        clusters.append(current_cluster)
     return clusters
 
-def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, List[Flag], Dict[str, Any]]:
+def build_fraud_graph(
+    applicants_data: List[Dict[str, Any]]
+) -> Tuple[nx.Graph, List[Flag], Dict[str, Any]]:
     """
-    Builds NetworkX graph and detects fraud rings.
-    applicants_data: list of dicts:
-      {
-        "applicant_id": str,
-        "case_id": str,
-        "name_masked": str,
-        "phone": Optional[str],
-        "account_number": Optional[str],
-        "address": Optional[str]
-      }
+    Constructs bipartite graph of applicants and identifiers.
     Returns:
-      graph: nx.Graph
-      flags: list of Flag objects
-      summary: ring cluster metadata
+        G: NetworkX graph
+        flags: list of Flag objects for suspicious applicants
+        summary: summary stats dict
     """
+    if len(applicants_data) > 500:
+        logger.info(f"[Graph] Capping analysis to latest 500 applicants (total {len(applicants_data)})")
+        applicants_data = applicants_data[:500]
+
     G = nx.Graph()
     flags: List[Flag] = []
 
-    # 1. Cluster addresses
-    addr_pairs = [(a["applicant_id"], a.get("address") or "") for a in applicants_data]
-    address_clusters = cluster_addresses(addr_pairs, threshold=92.0)
+    if not applicants_data:
+        return G, [], {
+            "total_applicants": 0,
+            "ring_applicants_count": 0,
+            "shared_applicants_count": 0,
+            "clusters": []
+        }
+
+    # 1. Address fuzzy matching across applicants
+    address_clusters: Dict[str, str] = {} # applicant_id -> cluster_id
+    assigned_cluster_id = 0
+    checked_pairs: Set[Tuple[str, str]] = set()
+
+    for i in range(len(applicants_data)):
+        for j in range(i + 1, len(applicants_data)):
+            a1 = applicants_data[i]
+            a2 = applicants_data[j]
+            id1, id2 = a1["applicant_id"], a2["applicant_id"]
+            addr1 = a1.get("address", "").strip()
+            addr2 = a2.get("address", "").strip()
+
+            if not addr1 or not addr2:
+                continue
+
+            # Compare addresses
+            sim = fuzz.token_sort_ratio(addr1, addr2)
+            if sim >= 92.0:
+                c1 = address_clusters.get(id1)
+                c2 = address_clusters.get(id2)
+                if not c1 and not c2:
+                    assigned_cluster_id += 1
+                    cid = f"cluster_{assigned_cluster_id}"
+                    address_clusters[id1] = cid
+                    address_clusters[id2] = cid
+                elif c1 and not c2:
+                    address_clusters[id2] = c1
+                elif not c1 and c2:
+                    address_clusters[id1] = c2
+                elif c1 and c2 and c1 != c2:
+                    # Merge clusters
+                    for k, v in list(address_clusters.items()):
+                        if v == c2:
+                            address_clusters[k] = c1
 
     # 2. Add nodes and edges
-    app_case_map = {}
     for a in applicants_data:
         app_id = a["applicant_id"]
-        case_id = a.get("case_id", app_id)
-        name_masked = a.get("name_masked", "Applicant")
-        app_case_map[app_id] = case_id
-
         app_node = f"app:{app_id}"
+        masked_name = a.get("name_masked", "Applicant")
+
         G.add_node(
             app_node,
             node_type="applicant",
+            label=masked_name,
+            title=f"Applicant: {masked_name} (Case #{a.get('case_id', app_id)[:8]})",
             applicant_id=app_id,
-            case_id=case_id,
-            label=name_masked,
-            title=f"Applicant: {name_masked}",
-            color="#6c757d",
+            case_id=a.get("case_id", app_id),
+            color="#6c757d", # Default grey
             shape="dot",
-            size=20
+            size=18
         )
 
         # Phone node
@@ -93,8 +138,8 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
         if phone:
             clean_p = "".join(filter(str.isdigit, str(phone)))
             masked_p = mask_phone(clean_p)
-            phone_hash = hashlib.sha256(clean_p.encode("utf-8")).hexdigest()[:12]
-            phone_node = f"phone:{phone_hash}"
+            phone_hash = compute_identifier_hmac(clean_p) or hashlib.sha256(clean_p.encode("utf-8")).hexdigest()
+            phone_node = f"phone:{phone_hash[:12]}"
             G.add_node(phone_node, node_type="identifier", label=masked_p, title=f"Phone: {masked_p}", color="#17a2b8", shape="diamond", size=14)
             G.add_edge(app_node, phone_node, relationship="HAS_PHONE")
 
@@ -103,8 +148,8 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
         if acc:
             clean_acc = str(acc).strip()
             masked_acc = mask_account(clean_acc)
-            acc_hash = hashlib.sha256(clean_acc.encode("utf-8")).hexdigest()[:12]
-            acc_node = f"acc:{acc_hash}"
+            acc_hash = compute_identifier_hmac(clean_acc) or hashlib.sha256(clean_acc.encode("utf-8")).hexdigest()
+            acc_node = f"acc:{acc_hash[:12]}"
             G.add_node(acc_node, node_type="identifier", label=masked_acc, title=f"Account: {masked_acc}", color="#28a745", shape="square", size=14)
             G.add_edge(app_node, acc_node, relationship="HAS_ACCOUNT")
 
@@ -185,8 +230,6 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
                 )
 
     summary = {
-        "total_nodes": G.number_of_nodes(),
-        "total_edges": G.number_of_edges(),
         "total_applicants": len(applicants_data),
         "ring_applicants_count": len(ring_members),
         "shared_applicants_count": len(shared_members),
@@ -195,130 +238,54 @@ def build_fraud_graph(applicants_data: List[Dict[str, Any]]) -> Tuple[nx.Graph, 
 
     return G, flags, summary
 
-def generate_offline_graph_html(G: nx.Graph, summary: Any = None) -> str:
+def get_serializable_graph_data(
+    applicants_data: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
-    Renders standalone self-contained Vis.js network graph HTML that works 100% offline.
+    Returns graph representation formatted for client-side Vis.js rendering with in-memory caching.
     """
-    nodes_data = []
-    for node_id, attrs in G.nodes(data=True):
-        nodes_data.append({
-            "id": node_id,
-            "label": attrs.get("label", node_id),
-            "title": attrs.get("title", node_id),
-            "color": attrs.get("color", "#97c2fc"),
-            "shape": attrs.get("shape", "dot"),
-            "size": attrs.get("size", 16)
+    global _GRAPH_CACHE
+    now = time.time()
+    if _GRAPH_CACHE["data"] is not None and (now - _GRAPH_CACHE["timestamp"]) < CACHE_TTL_SECS:
+        return _GRAPH_CACHE["data"]
+
+    G, flags, summary = build_fraud_graph(applicants_data)
+
+    nodes = []
+    for n, data in G.nodes(data=True):
+        nodes.append({
+            "id": n,
+            "label": data.get("label", n),
+            "title": data.get("title", n),
+            "color": data.get("color", "#6c757d"),
+            "shape": data.get("shape", "dot"),
+            "size": data.get("size", 16)
         })
 
-    edges_data = []
-    for u, v, attrs in G.edges(data=True):
-        edges_data.append({
+    edges = []
+    for u, v, data in G.edges(data=True):
+        edges.append({
             "from": u,
             "to": v,
-            "title": attrs.get("relationship", ""),
-            "color": {"color": "#adb5bd"}
+            "title": data.get("relationship", "LINKS"),
+            "color": {"color": "#cbd5e1"}
         })
 
-    nodes_json = json.dumps(nodes_data)
-    edges_json = json.dumps(edges_data)
+    result = {
+        "nodes": nodes,
+        "edges": edges,
+        "ring_count": summary.get("ring_applicants_count", 0),
+        "summary": summary,
+        "flags": [f.model_dump() for f in flags]
+    }
 
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Fraud Ring Bipartite Graph</title>
-<style>
-  html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f8fafc; }}
-  #network {{ width:100%; height:100%; }}
-  .legend {{ position:absolute; top:12px; left:12px; background:rgba(255,255,255,0.95); padding:10px 14px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1); font-size:12px; z-index:10; border:1px solid #e2e8f0; }}
-  .legend-item {{ display:flex; align-items:center; gap:8px; margin-bottom:4px; }}
-  .dot {{ width:12px; height:12px; border-radius:50%; display:inline-block; }}
-</style>
-<script>
-// Standalone Vis Network Engine (Offline Lightweight Canvas Renderer)
-window.onload = function() {{
-    const container = document.getElementById('network');
-    const nodes = {nodes_json};
-    const edges = {edges_json};
+    _GRAPH_CACHE["data"] = result
+    _GRAPH_CACHE["timestamp"] = now
+    return result
 
-    // Canvas-based interactive graph renderer
-    const canvas = document.createElement('canvas');
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-    container.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-
-    // Simple spring-embedder layout
-    const positions = {{}};
-    const n = nodes.length;
-    nodes.forEach((node, i) => {{
-        const angle = (i / n) * 2 * Math.PI;
-        const radius = 180 + (i % 3) * 60;
-        positions[node.id] = {{
-            x: canvas.width / 2 + Math.cos(angle) * radius,
-            y: canvas.height / 2 + Math.sin(angle) * radius,
-            vx: 0, vy: 0
-        }};
-    }});
-
-    // Draw frame
-    function draw() {{
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw edges
-        ctx.strokeStyle = '#cbd5e1';
-        ctx.lineWidth = 1.5;
-        edges.forEach(e => {{
-            const p1 = positions[e.from];
-            const p2 = positions[e.to];
-            if (p1 && p2) {{
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.stroke();
-            }}
-        }});
-
-        // Draw nodes
-        nodes.forEach(node => {{
-            const p = positions[node.id];
-            if (!p) return;
-            ctx.fillStyle = node.color || '#6c757d';
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, (node.size || 16) / 2, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            // Label
-            ctx.fillStyle = '#1e293b';
-            ctx.font = '11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(node.label, p.x, p.y + (node.size || 16) / 2 + 13);
-        }});
-    }}
-    draw();
-
-    window.addEventListener('resize', () => {{
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
-        draw();
-    }});
-}};
-</script>
-</head>
-<body>
-<div class="legend">
-  <div style="font-weight:600;margin-bottom:6px;">Network Legend</div>
-  <div class="legend-item"><span class="dot" style="background:#dc3545;"></span> Fraud Ring Member (>=3)</div>
-  <div class="legend-item"><span class="dot" style="background:#fd7e14;"></span> Shared Identifier (2)</div>
-  <div class="legend-item"><span class="dot" style="background:#6c757d;"></span> Benign Applicant</div>
-  <div class="legend-item"><span class="dot" style="background:#17a2b8;border-radius:2px;"></span> Phone Number</div>
-  <div class="legend-item"><span class="dot" style="background:#28a745;border-radius:2px;"></span> Bank Account</div>
-  <div class="legend-item"><span class="dot" style="background:#ffc107;border-radius:2px;"></span> Address Cluster</div>
-</div>
-<div id="network"></div>
-</body>
-</html>"""
-    return html
+def generate_offline_graph_html(G: nx.Graph, summary: Any = None) -> str:
+    """Optional export helper for offline graph generation."""
+    nodes = [{"id": n, "label": d.get("label", n), "color": d.get("color", "#6c757d")} for n, d in G.nodes(data=True)]
+    edges = [{"from": u, "to": v} for u, v in G.edges()]
+    import json
+    return f"<!DOCTYPE html><html><head><title>Fraud Ring Bipartite Graph</title></head><body><div id='net'></div><script>var nodes={json.dumps(nodes)}; var edges={json.dumps(edges)};</script></body></html>"
