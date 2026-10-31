@@ -19,23 +19,29 @@
       --amber-bg: #fef3c7;
       --red: #dc2626;
       --red-bg: #fee2e2;
+      --blue-bg: #eff6ff;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; min-height: 100vh; display: flex; flex-direction: column; }
     .demo-banner { background: #fef08a; color: #854d0e; text-align: center; padding: 10px 16px; font-weight: 700; font-size: 0.9rem; border-bottom: 1px solid #fde047; }
+    .prod-banner { background: #dbeafe; color: #1e40af; text-align: center; padding: 10px 16px; font-weight: 600; font-size: 0.9rem; border-bottom: 1px solid #bfdbfe; }
     .wakeup-note { background: #e0f2fe; color: #0369a1; text-align: center; padding: 6px 14px; font-size: 0.85rem; border-bottom: 1px solid #bae6fd; }
     .navbar { background: #1e293b; color: white; display: flex; justify-content: space-between; align-items: center; padding: 14px 28px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .nav-brand { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px; text-decoration: none; color: white; }
-    .nav-links { display: flex; gap: 20px; list-style: none; }
-    .nav-links a { color: #cbd5e1; text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: color 0.15s; }
+    .nav-links { display: flex; gap: 18px; list-style: none; align-items: center; }
+    .nav-links a { color: #cbd5e1; text-decoration: none; font-size: 0.92rem; font-weight: 500; transition: color 0.15s; }
     .nav-links a:hover, .nav-links a.active { color: white; }
-    .container { max-width: 1200px; margin: 32px auto; padding: 0 20px; }
+    .nav-user { display: flex; align-items: center; gap: 12px; margin-left: 12px; border-left: 1px solid #334155; padding-left: 16px; }
+    .user-pill { background: #334155; color: #f1f5f9; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; }
+    .container { max-width: 1200px; margin: 32px auto; padding: 0 20px; flex: 1; }
     .card { background: var(--card-bg); border-radius: 12px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 24px; margin-bottom: 24px; }
     .badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; }
     .badge-green { background: var(--green-bg); color: var(--green); }
     .badge-amber { background: var(--amber-bg); color: var(--amber); }
     .badge-red { background: var(--red-bg); color: var(--red); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 18px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-decoration: none; border: none; transition: background 0.15s; }
+    .badge-blue { background: var(--blue-bg); color: #1e40af; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 18px; border-radius: 8px; font-size: 0.92rem; font-weight: 600; cursor: pointer; text-decoration: none; border: none; transition: background 0.15s; }
+    .btn-sm { padding: 6px 12px; font-size: 0.82rem; }
     .btn-primary { background: var(--primary); color: white; }
     .btn-primary:hover { background: var(--primary-hover); }
     .btn-secondary { background: #e2e8f0; color: #334155; }
@@ -56,12 +62,22 @@
     .gauge-green { border-color: var(--green); color: var(--green); }
     .gauge-amber { border-color: var(--amber); color: var(--amber); }
     .gauge-red { border-color: var(--red); color: var(--red); }
+    .form-group { margin-bottom: 18px; }
+    .form-group label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+    .form-control { width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.95rem; }
+    footer { background: #f1f5f9; border-top: 1px solid var(--border); padding: 18px 24px; text-align: center; font-size: 0.85rem; color: var(--text-muted); }
   </style>
+  <script src="/static/js/api.js"></script>
 </head>
 <body>
-  <div class="demo-banner">⚠️ Demo with synthetic data. Do not upload real documents.</div>
+  {% if is_production %}
+  <div class="prod-banner">🔒 Production Pilot Mode: Data protected under DPDP Act & UIDAI guidelines. Full Aadhaar is never persisted.</div>
+  {% else %}
+  <div class="demo-banner">⚠️ Demo Mode with synthetic data. Do not upload real personal documents.</div>
+  {% endif %}
+
   <div id="wakeup-note" class="wakeup-note" style="display: none;">
-    ☕ Waking up the demo from Render free-tier sleep... Subsequent actions will respond immediately.
+    ☕ Waking up service from sleep... First request may take a few moments.
   </div>
   <script>
     if (!sessionStorage.getItem('visited')) {
@@ -84,12 +100,33 @@
       <li><a href="/ui/upload" class="{% if active_tab == 'upload' %}active{% endif %}">New Application</a></li>
       <li><a href="/ui/graph" class="{% if active_tab == 'graph' %}active{% endif %}">Fraud Graph</a></li>
       <li><a href="/ui/integrity" class="{% if active_tab == 'integrity' %}active{% endif %}">Ledger Integrity</a></li>
+      {% if current_user and current_user.role == 'admin' %}
+      <li><a href="/ui/audit" class="{% if active_tab == 'audit' %}active{% endif %}">Audit Trail</a></li>
+      {% endif %}
+      <li><a href="/privacy" class="{% if active_tab == 'privacy' %}active{% endif %}">Privacy Policy</a></li>
       <li><a href="/docs" target="_blank">API Docs</a></li>
+
+      {% if current_user %}
+      <li class="nav-user">
+        <span class="user-pill">{{ current_user.role|upper }}</span>
+        <a href="/account" style="color:#f8fafc; font-weight:600;" title="Account Settings">{{ current_user.full_name or current_user.email }}</a>
+        <button onclick="apiLogout()" class="btn btn-secondary btn-sm" style="padding:4px 8px; font-size:0.75rem;">Logout</button>
+      </li>
+      {% else %}
+      <li class="nav-user">
+        <a href="/login" class="btn btn-primary btn-sm" style="color:white;">Login</a>
+        <a href="/register" class="btn btn-secondary btn-sm">Register</a>
+      </li>
+      {% endif %}
     </ul>
   </nav>
 
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+
+  <footer>
+    <p>Automated 10-Module KYC Verification Platform &bull; DPDP & UIDAI Compliant &bull; <a href="/privacy" style="color:var(--primary); text-decoration:none;">Privacy Declaration</a> &bull; <a href="/docs" style="color:var(--primary); text-decoration:none;">Developer API</a></p>
+  </footer>
 </body>
 </html>

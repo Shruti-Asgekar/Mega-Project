@@ -1,0 +1,102 @@
+{% extends "ui/base.html" %}
+
+{% block title %}System Audit Trail & Governance — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
+  <div>
+    <h1 style="font-size: 1.75rem; font-weight: 700;">System Audit Trail & Governance</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Immutable activity log capturing authentication, case decisions, and data access without raw PII.</p>
+  </div>
+  <div style="display:flex; gap:10px;">
+    <button onclick="triggerRetentionSweep()" class="btn btn-secondary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+      Run DPDP Retention Sweep
+    </button>
+  </div>
+</div>
+
+<div class="card" style="padding: 16px 20px; margin-bottom: 20px;">
+  <form method="GET" action="/ui/audit" style="display:flex; gap:16px; align-items:center;">
+    <div style="flex:1;">
+      <input type="text" name="action" value="{{ filter_action or '' }}" placeholder="Filter by action (e.g. LOGIN_FAILED, CASE_DECISION_RECORDED, PIPELINE_EXECUTED)..." class="form-control" style="font-size:0.9rem;">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Filter Logs</button>
+    {% if filter_action %}
+    <a href="/ui/audit" class="btn btn-secondary btn-sm">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+    <h2 style="font-size: 1.15rem; font-weight: 600;">Recorded Audit Events ({{ logs|length }})</h2>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Timestamp (UTC)</th>
+        <th>Action</th>
+        <th>User Email / Role</th>
+        <th>Client IP</th>
+        <th>Case ID</th>
+        <th>Sanitized Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td style="font-size:0.85rem; color:var(--text-muted); white-space:nowrap;">{{ log.timestamp }}</td>
+        <td>
+          <span class="badge {% if 'FAILED' in log.action or 'LOCKED' in log.action %}badge-red{% elif 'DECISION' in log.action or 'REGISTER' in log.action %}badge-blue{% else %}badge-green{% endif %}">
+            {{ log.action }}
+          </span>
+        </td>
+        <td>
+          {% if log.user_email %}
+            <div><strong>{{ log.user_email }}</strong></div>
+            <span style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">{{ log.role|default('user') }}</span>
+          {% else %}
+            <span style="color:var(--text-muted); font-size:0.85rem;">Anonymous / System</span>
+          {% endif %}
+        </td>
+        <td style="font-family:monospace; font-size:0.85rem;">{{ log.ip or '-' }}</td>
+        <td style="font-size:0.85rem;">
+          {% if log.case_id %}
+            <a href="/ui/cases/{{ log.case_id }}" style="color:var(--primary); text-decoration:none;">{{ log.case_id[:12] }}...</a>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td style="font-size:0.82rem; font-family:monospace; color:#334155; max-width:320px; overflow:hidden; text-overflow:ellipsis;">
+          {{ log.details|tojson }}
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="6" style="text-align:center; padding: 32px; color:var(--text-muted);">
+          No audit logs found matching criteria.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+async function triggerRetentionSweep() {
+  if (!confirm('Execute DPDP Act retention sweep now? Expired document blobs beyond retention window will be permanently purged and ledger records tombstoned.')) {
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/auth/admin/retention-sweep', { method: 'POST' });
+    alert(`Sweep completed successfully.\nCases purged: ${res.cases_purged}\nBlobs cleared: ${res.documents_cleared}\nTombstones created: ${res.tombstones_created}`);
+    window.location.reload();
+  } catch (err) {
+    alert('Retention sweep failed: ' + err.message);
+  }
+}
+</script>
+{% endblock %}

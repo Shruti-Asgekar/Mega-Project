@@ -1,0 +1,107 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Account Settings & Privacy Rights — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+  <div style="margin-bottom: 24px;">
+    <h1 style="font-size: 1.75rem; font-weight: 700;">Account Settings & Privacy Rights</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Manage your credentials and exercise your statutory rights under the Digital Personal Data Protection (DPDP) Act.</p>
+  </div>
+
+  <div id="account-alert" class="alert" style="display: none;"></div>
+
+  <!-- Profile Card -->
+  <div class="card">
+    <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">User Profile</h2>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size:0.95rem;">
+      <div><strong>Full Name:</strong> {{ current_user.full_name or 'Not provided' }}</div>
+      <div><strong>Email:</strong> {{ current_user.email }}</div>
+      <div><strong>System Role:</strong> <span class="badge badge-blue">{{ current_user.role|upper }}</span></div>
+      <div><strong>Account Created:</strong> {{ current_user.created_at }}</div>
+    </div>
+  </div>
+
+  <!-- Change Password Card -->
+  <div class="card">
+    <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">Change Password</h2>
+    <form id="pwd-form" onsubmit="changePassword(event)">
+      <div class="form-group">
+        <label for="old_pwd">Current Password *</label>
+        <input type="password" id="old_pwd" required class="form-control" placeholder="••••••••••••">
+      </div>
+      <div class="form-group">
+        <label for="new_pwd">New Password (Min. 10 chars, uppercase, lowercase, digit, symbol) *</label>
+        <input type="password" id="new_pwd" required minlength="10" class="form-control" placeholder="••••••••••••">
+      </div>
+      <button type="submit" id="pwd-btn" class="btn btn-primary btn-sm">Update Password</button>
+    </form>
+  </div>
+
+  <!-- DPDP Rights -->
+  <div class="card" style="border-left: 6px solid #2563eb;">
+    <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 8px; color:#1e40af;">DPDP Statutory Data Rights</h2>
+    <p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:16px;">
+      In accordance with Chapter III of the Digital Personal Data Protection Act, 2023, you have the right to access your processed records in a machine-readable format or request the complete erasure of your identity.
+    </p>
+
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <a href="/api/auth/download-data" target="_blank" class="btn btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download My Data (JSON Export)
+      </a>
+
+      <button onclick="confirmDeleteAccount()" class="btn btn-danger">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        Right to Erasure (Delete Account)
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function changePassword(e) {
+  e.preventDefault();
+  const alertBox = document.getElementById('account-alert');
+  const btn = document.getElementById('pwd-btn');
+  alertBox.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+
+  const old_pwd = document.getElementById('old_pwd').value;
+  const new_pwd = document.getElementById('new_pwd').value;
+
+  try {
+    const res = await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: { old_password: old_pwd, new_password: new_pwd }
+    });
+    alertBox.className = 'alert alert-green';
+    alertBox.textContent = res.message || 'Password updated successfully.';
+    alertBox.style.display = 'block';
+    document.getElementById('pwd-form').reset();
+  } catch (err) {
+    alertBox.className = 'alert alert-red';
+    alertBox.textContent = err.message || 'Failed to update password.';
+    alertBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update Password';
+  }
+}
+
+async function confirmDeleteAccount() {
+  if (!confirm('Are you sure you want to permanently delete your account and associated verification cases? This action is irreversible under DPDP Act provisions.')) {
+    return;
+  }
+
+  try {
+    await apiFetch('/api/auth/delete-account', { method: 'POST' });
+    alert('Account deleted successfully. You will be redirected to the home page.');
+    window.location.href = '/ui';
+  } catch (err) {
+    alert('Failed to delete account: ' + err.message);
+  }
+}
+</script>
+{% endblock %}

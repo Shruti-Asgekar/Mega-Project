@@ -1,0 +1,71 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Applicant Registration — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="max-width: 480px; margin: 40px auto;">
+  <div class="card" style="padding: 32px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h1 style="font-size: 1.6rem; font-weight: 700; margin-bottom: 6px;">Register as Applicant</h1>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Create your secure account to submit and track verification cases.</p>
+    </div>
+
+    <div id="register-error" class="alert alert-red" style="display: none;"></div>
+
+    <form id="register-form">
+      <div class="form-group">
+        <label for="full_name">Full Legal Name *</label>
+        <input type="text" id="full_name" required minlength="2" class="form-control" placeholder="Ramesh Kumar">
+      </div>
+
+      <div class="form-group">
+        <label for="email">Email Address *</label>
+        <input type="email" id="email" required class="form-control" placeholder="ramesh@example.com" autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password (Min. 10 chars, uppercase, lowercase, number, symbol) *</label>
+        <input type="password" id="password" required minlength="10" class="form-control" placeholder="••••••••••••" autocomplete="new-password">
+        <span style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-top: 4px;">
+          Must include uppercase, lowercase, digit, and special character. Common passwords will be rejected.
+        </span>
+      </div>
+
+      <button type="submit" id="register-btn" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 8px;">
+        Create Applicant Account
+      </button>
+    </form>
+
+    <div style="margin-top: 20px; text-align: center; font-size: 0.88rem; color: var(--text-muted);">
+      Already have an account? <a href="/login" style="color: var(--primary); font-weight: 600; text-decoration: none;">Sign In</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById('register-form');
+const errorAlert = document.getElementById('register-error');
+const submitBtn = document.getElementById('register-btn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorAlert.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Creating Account...';
+
+  const full_name = document.getElementById('full_name').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+
+  try {
+    await apiRegister(email, password, full_name);
+    window.location.href = '/ui';
+  } catch (err) {
+    errorAlert.textContent = err.message || 'Registration failed. Check password complexity requirements.';
+    errorAlert.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create Applicant Account';
+  }
+});
+</script>
+{% endblock %}

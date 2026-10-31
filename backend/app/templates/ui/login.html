@@ -1,0 +1,64 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Sign In — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="max-width: 440px; margin: 40px auto;">
+  <div class="card" style="padding: 32px;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h1 style="font-size: 1.6rem; font-weight: 700; margin-bottom: 6px;">Sign In</h1>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Access KYC Verification Portal</p>
+    </div>
+
+    <div id="login-error" class="alert alert-red" style="display: none;"></div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label for="email">Work or Applicant Email</label>
+        <input type="email" id="email" required class="form-control" placeholder="name@company.com" autocomplete="username">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required class="form-control" placeholder="••••••••••••" autocomplete="current-password">
+      </div>
+
+      <button type="submit" id="login-btn" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 8px;">
+        Sign In
+      </button>
+    </form>
+
+    <div style="margin-top: 20px; text-align: center; font-size: 0.88rem; color: var(--text-muted);">
+      Don't have an account? <a href="/register" style="color: var(--primary); font-weight: 600; text-decoration: none;">Register as Applicant</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const form = document.getElementById('login-form');
+const errorAlert = document.getElementById('login-error');
+const submitBtn = document.getElementById('login-btn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorAlert.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Authenticating...';
+
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+
+  try {
+    const res = await apiLogin(email, password);
+    const params = new URLSearchParams(window.location.search);
+    const nextUrl = params.get('next') || '/ui';
+    window.location.href = nextUrl;
+  } catch (err) {
+    errorAlert.textContent = err.message || 'Invalid credentials or account locked.';
+    errorAlert.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign In';
+  }
+});
+</script>
+{% endblock %}
