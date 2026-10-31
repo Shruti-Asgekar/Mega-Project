@@ -193,6 +193,7 @@ def ui_account(
     )
 
 @ui_router.get("/privacy", response_class=HTMLResponse)
+@ui_router.get("/ui/privacy", response_class=HTMLResponse)
 def ui_privacy(
     request: Request,
     current_user: Optional[User] = Depends(get_current_user_optional)
