@@ -1,25 +1,34 @@
 services:
   - type: web
     name: mega-project-kyc
-    runtime: python
+    runtime: docker
     plan: free
     region: singapore
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.10
+      - key: APP_ENV
+        value: "production"
       - key: DEMO_MODE
-        value: "true"
+        value: "false"
       - key: SEED_ON_START
-        value: "true"
+        value: "false"
       - key: STORAGE_BACKEND
-        value: db
+        value: "db"
       - key: ML_MODE
-        value: inprocess
+        value: "inprocess"
+      - key: RETENTION_DAYS
+        value: "30"
+      - key: ADMIN_EMAIL
+        value: "admin@kyc-verification.internal"
+      - key: ADMIN_NAME
+        value: "Lead Compliance Administrator"
+      - key: ADMIN_PASSWORD
+        generateValue: true
       - key: SECRET_KEY
+        generateValue: true
+      - key: IDENTIFIER_HMAC_KEY
         generateValue: true
       - key: DEMO_ADMIN_KEY
         generateValue: true
