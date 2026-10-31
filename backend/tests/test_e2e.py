@@ -162,9 +162,14 @@ def test_graph_endpoints():
     finally:
         db.close()
 
-def test_integrity_verify_endpoint():
+def test_integrity_verify_endpoint(monkeypatch):
+    import backend.app.core.config as config
+    monkeypatch.setattr(config, "DEMO_MODE", True)
+    monkeypatch.setattr(config, "IS_PRODUCTION", False)
+    from backend.app.core.storage import restore_tampered_documents
     db = SessionLocal()
     try:
+        restore_tampered_documents(db)
         data = verify_ledger_integrity(db)
         assert "valid" in data
         assert data["valid"] is True

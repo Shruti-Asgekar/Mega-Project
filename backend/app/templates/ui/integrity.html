@@ -9,16 +9,20 @@
     <p style="color: var(--text-muted); font-size: 0.95rem;">Cryptographic audit trail anchoring verified document SHA-256 digests in an immutable block ledger.</p>
   </div>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    {% if not is_production %}
     <button id="tamper-btn" class="btn btn-danger" onclick="simulateTamper()">
       ⚠️ Simulate Tampering (Flip 1 Byte)
     </button>
+    {% endif %}
     <button id="verify-btn" class="btn btn-primary" onclick="runIntegrityAudit()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       Verify Integrity
     </button>
+    {% if not is_production %}
     <button id="restore-btn" class="btn btn-success" onclick="restoreOriginal()">
       ✓ Restore Original
     </button>
+    {% endif %}
   </div>
 </div>
 
@@ -50,11 +54,23 @@
       <tr id="row-{{ rec.seq }}">
         <td style="font-weight:700;">#{{ rec.seq }}</td>
         <td style="text-transform:capitalize;">{{ rec.doc_type|replace("_", " ") }}</td>
-        <td style="font-family:monospace; font-size:0.8rem; color:var(--text-muted);">{{ rec.file_sha256[:16] }}...</td>
+        <td style="font-family:monospace; font-size:0.8rem; color:var(--text-muted);">
+          {% if rec.is_tombstone %}
+            <span style="color:var(--amber); font-weight:600;">[PURGED BY RETENTION]</span>
+          {% else %}
+            {{ rec.file_sha256[:16] }}...
+          {% endif %}
+        </td>
         <td style="font-family:monospace; font-size:0.8rem; color:var(--text-muted);">{{ rec.prev_hash[:16] }}...</td>
         <td style="font-family:monospace; font-size:0.8rem; color:var(--text-muted);">{{ rec.record_hash[:16] }}...</td>
         <td style="font-size:0.85rem;">{{ rec.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-        <td><span class="badge badge-green" id="badge-{{ rec.seq }}">VERIFIED</span></td>
+        <td>
+          {% if rec.is_tombstone %}
+            <span class="badge badge-amber" id="badge-{{ rec.seq }}" title="{{ rec.tombstone_reason }}">TOMBSTONE</span>
+          {% else %}
+            <span class="badge badge-green" id="badge-{{ rec.seq }}">VERIFIED</span>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
       <tr>
@@ -77,16 +93,17 @@ async function runIntegrityAudit() {
   btn.textContent = 'Auditing Signatures...';
 
   try {
-    const res = await fetch('/api/integrity/verify');
-    const data = await res.json();
+    const data = await apiFetch('/api/integrity/verify');
 
     banner.style.display = 'block';
     if (data.valid) {
       banner.className = 'alert alert-green';
       bannerText.textContent = `✓ SUCCESS: Cryptographic ledger verified intact! All ${data.total_records} document fingerprints and block links match.`;
       document.querySelectorAll('[id^="badge-"]').forEach(el => {
-        el.className = 'badge badge-green';
-        el.textContent = 'VERIFIED';
+        if (!el.textContent.includes('TOMBSTONE')) {
+          el.className = 'badge badge-green';
+          el.textContent = 'VERIFIED';
+        }
       });
     } else {
       banner.className = 'alert alert-red';
@@ -102,7 +119,7 @@ async function runIntegrityAudit() {
   } catch (err) {
     banner.style.display = 'block';
     banner.className = 'alert alert-red';
-    bannerText.textContent = 'Failed to execute cryptographic verification audit.';
+    bannerText.textContent = 'Failed to execute cryptographic verification audit: ' + err.message;
   } finally {
     btn.disabled = false;
     btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Verify Integrity`;
@@ -111,19 +128,15 @@ async function runIntegrityAudit() {
 
 async function simulateTamper() {
   const btn = document.getElementById('tamper-btn');
+  if (!btn) return;
   btn.disabled = true;
   btn.textContent = 'Tampering byte...';
 
   try {
-    const res = await fetch('/api/demo/tamper', { method: 'POST' });
-    const data = await res.json();
-    if (res.ok) {
-      await runIntegrityAudit();
-    } else {
-      alert(data.detail || 'Failed to simulate tamper.');
-    }
+    await apiFetch('/api/demo/tamper', { method: 'POST' });
+    await runIntegrityAudit();
   } catch (e) {
-    alert('Error triggering tamper demo: ' + e);
+    alert('Error triggering tamper demo: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = '⚠️ Simulate Tampering (Flip 1 Byte)';
@@ -132,19 +145,15 @@ async function simulateTamper() {
 
 async function restoreOriginal() {
   const btn = document.getElementById('restore-btn');
+  if (!btn) return;
   btn.disabled = true;
   btn.textContent = 'Restoring...';
 
   try {
-    const res = await fetch('/api/demo/restore', { method: 'POST' });
-    const data = await res.json();
-    if (res.ok) {
-      await runIntegrityAudit();
-    } else {
-      alert(data.detail || 'Failed to restore document.');
-    }
+    await apiFetch('/api/demo/restore', { method: 'POST' });
+    await runIntegrityAudit();
   } catch (e) {
-    alert('Error triggering restore: ' + e);
+    alert('Error triggering restore: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = '✓ Restore Original';

@@ -102,6 +102,8 @@ def test_storage_backend_disk_mode(memory_db, tmp_path, monkeypatch):
 def test_demo_tamper_and_restore_db_mode(memory_db, monkeypatch):
     """Verifies tamper simulation flips a byte and restore recovers original state."""
     monkeypatch.setattr(config, "STORAGE_BACKEND", "db")
+    monkeypatch.setattr(config, "DEMO_MODE", True)
+    monkeypatch.setattr(config, "IS_PRODUCTION", False)
 
     case = Case(applicant_id="app-demo", status="SUBMITTED")
     memory_db.add(case)

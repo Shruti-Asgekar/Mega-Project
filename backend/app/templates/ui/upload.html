@@ -11,7 +11,7 @@
 
   <div id="error-alert" class="alert alert-red" style="display: none;"></div>
 
-  <form id="upload-form" action="/api/cases" method="POST" enctype="multipart/form-data" class="card">
+  <form id="upload-form" class="card">
     <div style="margin-bottom: 20px;">
       <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">1. Applicant Information</h2>
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -55,7 +55,7 @@
     <div style="margin-bottom: 24px; background:#eff6ff; padding:16px; border-radius:8px; border:1px solid #bfdbfe;">
       <h2 style="font-size: 1.05rem; font-weight: 600; color:#1e40af; margin-bottom: 8px;">3. Privacy Declaration & Applicant Consent (Mandatory)</h2>
       <p style="font-size:0.85rem; color:#1e3a8a; margin-bottom: 12px; line-height:1.4;">
-        "I hereby declare that the documents and information provided are genuine. I authorize the verification system to parse, validate, and perform anti-fraud checks on my submitted KYC documents and bank statements."
+        "I hereby declare that the documents and information provided are genuine. I authorize the verification system to parse, validate, and perform anti-fraud checks on my submitted KYC documents and bank statements in accordance with the Indian DPDP Act. Full Aadhaar is never persisted in plaintext."
       </p>
       <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; font-size:0.95rem;">
         <input type="checkbox" id="consent_checkbox" name="consent_accepted" value="true" style="width:18px; height:18px;">
@@ -89,27 +89,28 @@ form.addEventListener('submit', async (e) => {
 
   const submitBtn = document.getElementById('submit-btn');
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Processing Pipeline...';
+  submitBtn.textContent = 'Submitting Application...';
 
   const formData = new FormData(form);
 
   try {
-    const res = await fetch('/api/cases', {
+    const data = await apiFetch('/api/cases', {
       method: 'POST',
       body: formData
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail?.error || data.detail || 'Application submission failed');
+
+    const caseId = data.case_id || data.id;
+    if (caseId) {
+      window.location.href = `/ui/cases/${caseId}`;
+    } else {
+      window.location.href = '/ui';
     }
-    // Redirect to case details
-    window.location.href = `/ui/cases/${data.id}`;
   } catch (err) {
-    errorAlert.textContent = err.message;
+    errorAlert.textContent = err.message || 'Submission failed. Please verify your inputs and try again.';
     errorAlert.style.display = 'block';
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Run Complete Verification Pipeline →';
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Run Complete Verification Pipeline \u2192';
   }
 });
 </script>

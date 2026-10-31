@@ -1,0 +1,58 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Privacy Declaration & DPDP Compliance — KYC Platform{% endblock %}
+
+{% block content %}
+<div style="max-width: 900px; margin: 0 auto;">
+  <div style="margin-bottom: 24px;">
+    <h1 style="font-size: 2rem; font-weight: 700;">Privacy Declaration & Statutory Compliance</h1>
+    <p style="color: var(--text-muted); font-size: 0.95rem;">Commitment to Data Privacy under the Indian Digital Personal Data Protection (DPDP) Act, 2023 & UIDAI Guidelines.</p>
+  </div>
+
+  <div class="card" style="line-height: 1.7; font-size: 0.95rem;">
+    <h2 style="font-size: 1.25rem; font-weight: 700; color: #1e40af; margin-bottom: 12px;">1. Privacy by Design: Aadhaar Redaction</h2>
+    <p style="margin-bottom: 14px;">
+      In compliance with UIDAI regulations and the Aadhaar and Other Laws (Amendment) Act, <strong>our platform never stores, processes, or logs 12-digit plaintext Aadhaar numbers</strong>.
+    </p>
+    <ul style="margin-left: 24px; margin-bottom: 18px;">
+      <li>During extraction, Aadhaar numbers are immediately transformed into masked format (<code>XXXX-XXXX-1234</code>).</li>
+      <li>Cross-applicant duplicate and fraud ring detection is performed strictly using a one-way keyed HMAC (<code>HMAC-SHA256</code> with a secure server-side salt). The raw identity is mathematically non-recoverable from this fingerprint.</li>
+    </ul>
+
+    <h2 style="font-size: 1.25rem; font-weight: 700; color: #1e40af; margin-bottom: 12px;">2. Cryptographic Security & At-Rest Encryption</h2>
+    <p style="margin-bottom: 14px;">
+      All submitted personal identifiers (applicant names, phone numbers, addresses, account numbers) and stored document payloads are encrypted at rest using AES-128-CBC / Fernet cryptographic keys.
+    </p>
+    <p style="margin-bottom: 18px;">
+      Every uploaded document is cryptographically anchored into a SHA-256 Merkle-like hash chain. Once recorded, document records cannot be modified or re-sequenced without breaking the cryptographic integrity of the entire ledger.
+    </p>
+
+    <h2 style="font-size: 1.25rem; font-weight: 700; color: #1e40af; margin-bottom: 12px;">3. Data Retention & Tombstoning (DPDP Act, 2023)</h2>
+    <p style="margin-bottom: 14px;">
+      Under statutory data minimization principles, verification documents and applicant PII are retained only as long as necessary for the verification decision:
+    </p>
+    <ul style="margin-left: 24px; margin-bottom: 18px;">
+      <li><strong>Retention Window:</strong> Verification payloads expire after <strong>30 days</strong> by default.</li>
+      <li><strong>Cryptographic Tombstones:</strong> Upon expiration or user erasure requests, document payloads are permanently destroyed, and a <code>Tombstone</code> record is stamped onto the ledger. This guarantees that cryptographic chain linkage remains verifiable while honoring the complete erasure of personal data.</li>
+    </ul>
+
+    <h2 style="font-size: 1.25rem; font-weight: 700; color: #1e40af; margin-bottom: 12px;">4. Statutory Data Principal Rights</h2>
+    <p style="margin-bottom: 14px;">
+      As a Data Principal under the DPDP Act, you have the following rights:
+    </p>
+    <ul style="margin-left: 24px; margin-bottom: 18px;">
+      <li><strong>Right to Access:</strong> View all summary data and verification flags associated with your case at any time.</li>
+      <li><strong>Right to Correction:</strong> Request human officer re-review if document extraction or quality checks produced false flags.</li>
+      <li><strong>Right to Data Portability:</strong> Export a machine-readable JSON copy of your personal data on your <a href="/account" style="color:var(--primary);">Account Settings</a> page.</li>
+      <li><strong>Right to Erasure:</strong> Permanently delete your user profile and document records via the right-to-erasure workflow.</li>
+    </ul>
+
+    <h2 style="font-size: 1.25rem; font-weight: 700; color: #1e40af; margin-bottom: 12px;">5. Data Protection Officer (DPO) Contact</h2>
+    <p>
+      For privacy inquiries, audit requests, or grievance redressal, contact the designated Data Protection Officer:<br>
+      <strong>Email:</strong> <code>privacy@kyc-verification.internal</code><br>
+      <strong>Jurisdiction:</strong> Republic of India &bull; Digital Personal Data Protection Board of India
+    </p>
+  </div>
+</div>
+{% endblock %}

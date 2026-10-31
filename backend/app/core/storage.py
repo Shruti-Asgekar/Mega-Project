@@ -2,6 +2,7 @@
 Storage Abstraction Layer.
 Supports database blob storage (BYTEA / LargeBinary) for ephemeral/cloud environments (Render/Neon)
 and filesystem storage for local development. Provides unified byte access and safe temp-file context.
+Encrypts document payloads at rest using Fernet while computing hash chain signatures over original bytes.
 """
 
 import os
@@ -14,6 +15,7 @@ from typing import Optional, Generator, Tuple
 from sqlalchemy.orm import Session
 
 from backend.app.core import config
+from backend.app.core.security import encrypt_bytes, decrypt_bytes
 from backend.app.db.models import Document, DocumentBlob, DemoTamperLog
 
 logger = logging.getLogger("kyc.storage")
@@ -26,70 +28,66 @@ def save_document(
 ) -> str:
     """
     Persists document bytes either in PostgreSQL BYTEA table or on local filesystem.
-    Updates document sha256 and file_path accordingly.
+    Computes sha256 over original plaintext bytes, then encrypts payload at rest.
     """
     file_sha256 = hashlib.sha256(file_bytes).hexdigest()
     document.sha256 = file_sha256
 
+    # Encrypt at rest
+    encrypted_payload = encrypt_bytes(file_bytes)
+
     if config.STORAGE_BACKEND == "db":
-        # Database blob storage
+        # Database blob storage (encrypted at rest)
         blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == document.id).first()
         if blob:
             blob.filename = filename
-            blob.data = file_bytes
+            blob.data = encrypted_payload
         else:
             blob = DocumentBlob(
                 document_id=document.id,
                 filename=filename,
-                data=file_bytes
+                data=encrypted_payload
             )
             db.add(blob)
         document.file_path = f"db://{document.id}/{filename}"
-        logger.info(f"[Storage:db] Saved document {document.id} ({len(file_bytes)} bytes) to document_blobs")
+        logger.info(f"[Storage:db] Saved document {document.id} ({len(file_bytes)} plaintext bytes, encrypted at rest) to document_blobs")
     else:
         # Filesystem storage
         clean_name = f"{document.id}_{os.path.basename(filename)}"
         target_path = config.UPLOAD_DIR / clean_name
-        target_path.write_bytes(file_bytes)
+        target_path.write_bytes(encrypted_payload)
         document.file_path = str(target_path)
-        logger.info(f"[Storage:disk] Saved document {document.id} to {target_path}")
+        logger.info(f"[Storage:disk] Saved document {document.id} (encrypted at rest) to {target_path}")
 
     return document.file_path
 
 def get_document_bytes(db: Session, document_id: str) -> Optional[bytes]:
-    """Retrieves document bytes transparently from DB blob or filesystem."""
+    """Retrieves document bytes transparently from DB blob or filesystem, decrypting if encrypted."""
     # 1. Try DB blob table first
     blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == document_id).first()
     if blob and blob.data:
-        return blob.data
+        return decrypt_bytes(blob.data)
 
     # 2. Try disk file path from document record
     doc = db.query(Document).filter(Document.id == document_id).first()
     if doc and doc.file_path and not doc.file_path.startswith("db://"):
         disk_path = Path(doc.file_path)
         if disk_path.exists():
-            return disk_path.read_bytes()
+            raw = disk_path.read_bytes()
+            return decrypt_bytes(raw)
 
     return None
 
 @contextmanager
 def get_document_file_context(db: Session, document_id: str) -> Generator[Path, None, None]:
     """
-    Context manager that guarantees a readable physical file on disk.
-    If the document is stored in DB blob, creates a temporary file and deletes it on exit.
+    Context manager that guarantees a readable decrypted physical file on disk.
+    Creates a temporary decrypted file and securely deletes it on exit.
     """
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise FileNotFoundError(f"Document {document_id} not found in database.")
 
-    # If physical file already exists on disk, use it directly
-    if doc.file_path and not doc.file_path.startswith("db://"):
-        p = Path(doc.file_path)
-        if p.exists():
-            yield p
-            return
-
-    # Otherwise stream bytes from DB blob into temporary file
     data = get_document_bytes(db, document_id)
     if data is None:
         raise FileNotFoundError(f"No bytes found for document {document_id} in blob or disk.")
@@ -111,76 +109,103 @@ def get_document_file_context(db: Session, document_id: str) -> Generator[Path, 
 def tamper_document_byte(db: Session, document_id: Optional[str] = None) -> Tuple[str, int, int]:
     """
     Flips a single byte in stored document data to simulate physical tampering.
-    Records the original byte and offset in demo_tamper_log.
+    Only permitted when DEMO_MODE=true and not in production.
     """
+    if config.IS_PRODUCTION or not config.DEMO_MODE:
+        raise PermissionError("Tampering simulation is disabled in pilot and production environments.")
+
     # Pick target document
     doc = None
     if document_id:
         doc = db.query(Document).filter(Document.id == document_id).first()
-
     if not doc:
-        # Find first document that has bytes
-        candidates = db.query(Document).all()
-        for cand in candidates:
-            if get_document_bytes(db, cand.id) is not None:
-                doc = cand
-                break
-
+        doc = db.query(Document).order_by(Document.created_at.desc()).first()
     if not doc:
-        raise ValueError("No verified documents found to tamper.")
+        raise ValueError("No documents exist in the database to simulate tampering.")
 
-    data = get_document_bytes(db, doc.id)
-    if not data or len(data) == 0:
-        raise ValueError(f"Document {doc.id} contains empty payload.")
+    target_id = doc.id
 
-    content = bytearray(data)
-    idx = len(content) // 2
-    orig_byte = content[idx]
-    content[idx] ^= 0xFF # Flip bits
+    # 1. If in DB mode
+    blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == target_id).first()
+    if blob and blob.data:
+        raw_bytes = bytearray(blob.data)
+        if len(raw_bytes) == 0:
+            raise ValueError(f"Document {target_id} has 0 bytes.")
+        offset = len(raw_bytes) // 2
+        orig_byte = raw_bytes[offset]
+        raw_bytes[offset] = (orig_byte ^ 0xFF) # Invert bits
+        blob.data = bytes(raw_bytes)
 
-    # Record tamper action in log
-    tamper_rec = DemoTamperLog(
-        document_id=doc.id,
-        byte_offset=idx,
-        original_byte=orig_byte
-    )
-    db.add(tamper_rec)
+        # Record in tamper log
+        log = DemoTamperLog(
+            document_id=target_id,
+            byte_offset=offset,
+            original_byte=orig_byte
+        )
+        db.add(log)
+        db.commit()
+        logger.warning(f"[Storage:Tamper] Flipped byte at offset {offset} for document {target_id} in DB")
+        return target_id, offset, orig_byte
 
-    # Persist tampered bytes
-    blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == doc.id).first()
-    if blob:
-        blob.data = bytes(content)
-    elif doc.file_path and not doc.file_path.startswith("db://"):
-        Path(doc.file_path).write_bytes(content)
+    # 2. Disk mode
+    if doc.file_path and not doc.file_path.startswith("db://"):
+        p = Path(doc.file_path)
+        if p.exists():
+            raw_bytes = bytearray(p.read_bytes())
+            offset = len(raw_bytes) // 2
+            orig_byte = raw_bytes[offset]
+            raw_bytes[offset] = (orig_byte ^ 0xFF)
+            p.write_bytes(bytes(raw_bytes))
 
-    db.commit()
-    logger.warning(f"[TAMPER] Document {doc.id} tampered at offset {idx} (original={orig_byte})")
-    return doc.id, idx, orig_byte
+            log = DemoTamperLog(
+                document_id=target_id,
+                byte_offset=offset,
+                original_byte=orig_byte
+            )
+            db.add(log)
+            db.commit()
+            logger.warning(f"[Storage:Tamper] Flipped byte at offset {offset} for document {target_id} on disk")
+            return target_id, offset, orig_byte
+
+    raise ValueError(f"Could not locate storage payload for document {target_id}")
 
 def restore_tampered_documents(db: Session) -> int:
-    """Restores all tampered documents to their original bytes and clears tamper logs."""
-    logs = db.query(DemoTamperLog).all()
-    restored_count = 0
+    """Restores all tampered documents to their verified original states."""
+    if config.IS_PRODUCTION or not config.DEMO_MODE:
+        raise PermissionError("Tamper restoration is disabled in pilot and production environments.")
 
-    for log in logs:
-        data = get_document_bytes(db, log.document_id)
-        if data and len(data) > log.byte_offset:
-            content = bytearray(data)
-            content[log.byte_offset] = log.original_byte
+    tamper_logs = db.query(DemoTamperLog).all()
+    if not tamper_logs:
+        return 0
 
-            blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == log.document_id).first()
-            if blob:
-                blob.data = bytes(content)
+    count = 0
+    for log in tamper_logs:
+        target_id = log.document_id
+        offset = log.byte_offset
+        orig_byte = log.original_byte
 
-            doc = db.query(Document).filter(Document.id == log.document_id).first()
-            if doc and doc.file_path and not doc.file_path.startswith("db://"):
-                p = Path(doc.file_path)
-                if p.exists():
-                    p.write_bytes(content)
+        # Try DB
+        blob = db.query(DocumentBlob).filter(DocumentBlob.document_id == target_id).first()
+        if blob and blob.data:
+            raw_bytes = bytearray(blob.data)
+            if offset < len(raw_bytes):
+                raw_bytes[offset] = orig_byte
+                blob.data = bytes(raw_bytes)
+                count += 1
 
-            restored_count += 1
+        # Try Disk
+        doc = db.query(Document).filter(Document.id == target_id).first()
+        if doc and doc.file_path and not doc.file_path.startswith("db://"):
+            p = Path(doc.file_path)
+            if p.exists():
+                raw_bytes = bytearray(p.read_bytes())
+                if offset < len(raw_bytes):
+                    raw_bytes[offset] = orig_byte
+                    p.write_bytes(bytes(raw_bytes))
+                    count += 1
+
         db.delete(log)
 
     db.commit()
-    logger.info(f"[RESTORE] Restored {restored_count} tampered document(s).")
-    return restored_count
+    logger.info(f"[Storage:Restore] Successfully restored {count} tampered document payload(s).")
+    return count
